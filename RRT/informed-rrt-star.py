@@ -237,6 +237,7 @@ class RRTGraph:
         self.obsNum = obsnum
 
         self.goalstate = []
+        self.goal_parents = set()
         self.path = []
         self.ellipse = None
 
@@ -420,39 +421,35 @@ class RRTGraph:
 
     def step(self, node, dmax=10, bias=False):
 
+        point = self.sample_envir() if not bias else self.goal
+
         foundGoal = bias
 
-        if not bias and abs(self.x[node] - self.goal[0]) < dmax and abs(self.y[node] - self.goal[1]) < dmax:
+        if not bias and abs(point[0] - self.goal[0]) < dmax and abs(point[1] - self.goal[1]) < dmax:
             # jump to goal
-            self.x[node] = self.goal[0]
-            self.y[node] = self.goal[1]
+            point = self.goal
             foundGoal = True
 
-        neighbors = [x[2] for x in self.kdTree.get_knn(self.goal if bias else (self.x[node], self.y[node]), min(10, max(5, len(self.x) // 10)), True) if x[2] != node and (not bias or not self.cross_obstacle_points(x[1], self.goal))]
+        neighbors = [i[2] for i in self.kdTree.get_knn(point, min(10, max(5, len(self.x) // 10)), True) if i[2] != node and not (foundGoal and i[2] in self.goal_parents) and not self.cross_obstacle_points(i[1], point)]
 
         # bad radial method
         # neighbors = [i for i in range(self.number_of_nodes()) if self.calcDistance(self.x[node], self.y[node], self.x[i], self.y[i]) <= dmax and i != node]
         # if len(neighbors) == 0: neighbors = [self.kdTree.get_nearest((self.x[node], self.y[node]))[2]]
 
         if not len(neighbors):
-            if bias: return
-            raise Exception("No neighbors found for non-bias")
+            return
 
         bestNeighbor = min(neighbors, key=lambda i: self.costs[i])
-        if foundGoal and any(bestNeighbor == self.parent[i] for i in self.goalstate):
-            if not bias: self.remove_node(node)
-            return
 
-        if bias:
-            self.add_node(node, self.goal[0], self.goal[1])
-        if not self.connect(bestNeighbor, node):
-            return
+        self.add_node(node, point[0], point[1])
+        self.add_edge(bestNeighbor, node)
         
         dist = self.distance(bestNeighbor, node)
         if node == self.number_of_nodes()-1: self.add_cost(node, dist + self.costs[self.parent[node]])
 
         if foundGoal:
             self.goalstate.append(node)
+            self.goal_parents.add(node)
             if not self.goalFlag: self.num_not_in_ellipse = self.number_of_nodes()
             self.goalFlag = foundGoal = True
             
@@ -461,24 +458,25 @@ class RRTGraph:
 
             if (not self.ellipse) or (pathLength < self.ellipse.a * 2):
                 self.ellipse = Ellipse(
-                    (self.start[0], self.start[1]),
-                    (self.goal[0], self.goal[1]),
+                    self.start,
+                    self.goal,
                     pathLength,
                     self.mapw,
                     self.maph
                 )
 
-        for i in range(1, len(neighbors)):
-            if neighbors[i] == bestNeighbor: continue
+        for i in range(0, len(neighbors)):
             neighbor = neighbors[i]
+            if neighbor == bestNeighbor: continue
             dist_to_neighbor = self.distance(neighbor, node)
             neighborCost = self.costs[node] + dist_to_neighbor
-            if neighborCost < self.costs[neighbor] and (bias or not self.cross_obstacle(neighbor, node)) and not self.is_ancestor(neighbor, node):
+            if neighborCost < self.costs[neighbor] and not self.is_ancestor(neighbor, node):
                 self.costs[neighbor] = neighborCost
 
                 if self.costs[neighbor] <= 0:
                     # print(dist, dist_to_neighbor, neighbor, node, self.x[neighbor], self.y[neighbor], self.x[node], self.y[node])
                     raise Exception("Costs are negative")
+
                 self.children[self.parent[neighbor]].remove(neighbor)
                 self.parent[neighbor] = node
                 self.children[node].add(neighbor)
@@ -493,9 +491,9 @@ class RRTGraph:
                         self.costs[child] = self.costs[self.parent[child]] + self.distance(self.parent[child], child)
                         stack.append(self.children[child])
 
-        self.kdTree.add_point(((self.x[node], self.y[node]), node))
+        self.kdTree.add_point((point, node))
 
-        if self.dist_points((self.x[node], self.y[node]), (self.goal[0], self.goal[1])) <= 50:
+        if not foundGoal and self.dist_points(point, self.goal) <= 50:
             self.step(self.number_of_nodes(), bias = True)
 
     def path_to_goal(self):
@@ -523,8 +521,6 @@ class RRTGraph:
 
     def expand(self):
         n = self.number_of_nodes()
-        x,y = self.sample_envir()
-        self.add_node(n, x, y)
         self.step(n)
         return self.x, self.y, self.parent
 
