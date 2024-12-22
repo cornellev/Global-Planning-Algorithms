@@ -1,7 +1,7 @@
 import random
 import math
 import pygame
-import time
+import numpy as np
 import heapq
 
 class KDTree(object):
@@ -126,9 +126,10 @@ class RRTMap:
                 pygame.draw.polygon(self.map, self.black, properties)
 
 class Ellipse:
-    def __init__(self, focus1, focus2, major_axis_length, maxX, maxY):
+    def __init__(self, focus1, focus2, major_axis_length, maxX, maxY, obstacle_grid):
         self.maxX = maxX
         self.maxY = maxY
+        self.obstacle_grid = obstacle_grid
 
         self.focus1 = focus1
         self.focus2 = focus2
@@ -173,7 +174,7 @@ class Ellipse:
             final_x = round(x_rotated + self.center_x)
             final_y = round(y_rotated + self.center_y)
 
-            if final_x > 0 and final_y > 0 and final_x < self.maxX and final_y < self.maxY:
+            if 0 < final_x < self.maxX and 0 < final_y < self.maxY and not self.obstacle_grid[final_x, final_y]:
                 return round(final_x), round(final_y)
     
     def draw_bounding_rectangle(self, surface, color=(70, 70, 70), line_width=2):
@@ -240,6 +241,11 @@ class RRTGraph:
         self.goal_parents = set()
         self.path = []
         self.ellipse = None
+    
+    def cache_obstacle_grid(self):
+        self.obstacle_grid = np.zeros((self.maph, self.mapw), dtype=bool)
+        pygame_array = pygame.surfarray.array3d(self.surface)
+        self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
     def makeRandomShape(self):
         shape_type = random.choice(["rect", "circle", "triangle"])
@@ -339,7 +345,7 @@ class RRTGraph:
             else:
                 x, y = random.randint(0, self.mapw - 1), random.randint(0, self.maph - 1)
             
-            if self.surface.get_at((x, y)) != (0, 0, 0, 255):
+            if not self.obstacle_grid[x, y]:
                 break
         return x,y
 
@@ -350,11 +356,11 @@ class RRTGraph:
 
     def isFree(self):
         n = self.number_of_nodes() - 1
-        try: color_at_node = pygame.Surface.get_at(self.surface, (self.x[n], self.y[n]))
+        try: color_at_node = self.obstacle_grid[self.x[n], self.y[n]]
         except Exception as e:
             print(n, self.x[n], self.y[n])
             raise e
-        return color_at_node != (0, 0, 0, 255)
+        return not color_at_node
     
     def dist_points(self, p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
@@ -366,7 +372,7 @@ class RRTGraph:
         points_on_line = self.get_line_points(startPoint, endPoint, num_points)
         
         for point in points_on_line:
-            if pygame.Surface.get_at(self.surface, point) == (0, 0, 0, 255):
+            if self.obstacle_grid[point[0], point[1]]:
                 return True
         return False
 
@@ -462,7 +468,8 @@ class RRTGraph:
                     self.goal,
                     pathLength,
                     self.mapw,
-                    self.maph
+                    self.maph,
+                    self.obstacle_grid
                 )
 
         for i in range(0, len(neighbors)):
@@ -551,6 +558,7 @@ def main():
     # confined = [    ('rect', (794, 5, 45, 39)),    ('triangle', [(918, 364), (978, 364), (941, 315)]),    ('triangle', [(230, 98), (272, 98), (254, 46)]),    ('rect', (323, 226, 40, 56)),    ('triangle', [(670, 547), (724, 547), (695, 505)]),    ('triangle', [(873, 359), (931, 359), (901, 307)]),    ('circle', ((617, 232), 28)),    ('rect', (645, 478, 54, 57)),    ('circle', ((168, 243), 21)),    ('rect', (438, 427, 55, 37)),    ('circle', ((590, 551), 27)),    ('rect', (588, 23, 43, 41)),    ('triangle', [(876, 465), (925, 465), (900, 412)]),    ('circle', ((324, 554), 17)),    ('rect', (386, 363, 51, 32)),    ('circle', ((418, 60), 17)),    ('rect', (105, 84, 52, 37)),    ('triangle', [(54, 84), (102, 84), (83, 53)]),    ('circle', ((541, 567), 28)),    ('circle', ((830, 291), 20)),    ('rect', (845, 88, 50, 39)),    ('triangle', [(916, 8), (956, 8), (943, -44)]),    ('circle', ((359, 406), 28)),    ('triangle', [(175, 416), (235, 416), (198, 369)]),    ('circle', ((412, 206), 26)),    ('rect', (380, 45, 49, 31)),    ('circle', ((440, 264), 22)),    ('rect', (174, 461, 45, 53)),    ('circle', ((310, 538), 24)),    ('rect', (68, 565, 45, 44)),    ('rect', (653, 196, 60, 40)),    ('triangle', [(376, 449), (422, 449), (391, 394)]),    ('triangle', [(0, 319), (48, 319), (16, 264)]),    ('rect', (565, 234, 42, 34)),    ('circle', ((530, 184), 26)),    ('triangle', [(728, 112), (766, 112), (745, 52)]),    ('circle', ((683, 339), 15)),    ('triangle', [(864, 140), (919, 140), (887, 93)]),    ('triangle', [(636, 163), (670, 163), (664, 118)]),    ('rect', (40, 2, 35, 54)),    ('triangle', [(931, 507), (971, 507), (958, 456)]),    ('triangle', [(339, 493), (387, 493), (366, 458)]),    ('rect', (135, 552, 45, 45)),    ('circle', ((245, 517), 16)),    ('circle', ((350, 181), 15)),    ('circle', ((119, 187), 30)),    ('circle', ((223, 151), 29)),    ('rect', (92, 108, 53, 39)),    ('rect', (327, 267, 31, 57)),    ('triangle', [(798, 174), (835, 174), (823, 133)])]
     # obstacles = confined
     map.drawMap(obstacles)
+    graph.cache_obstacle_grid()
 
     pygame.display.update()
     pygame.event.clear()
