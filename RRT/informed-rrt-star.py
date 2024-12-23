@@ -79,19 +79,19 @@ class RRTMap:
         self.start = start
         self.goal = goal
         self.MapDimensions = MapDimensions
-        self.Maph, self.Mapw = self.MapDimensions
+        self.maph, self.mapw = self.MapDimensions
 
         self.MapWindowName = "RRT* - Optimized Path Planning"
         pygame.display.set_caption(self.MapWindowName)
-        self.map = pygame.display.set_mode((self.Mapw, self.Maph))
+        self.map = pygame.display.set_mode((self.mapw, self.maph))
         self.map.fill((255, 255, 255))
         self.nodeRad = 0
         self.nodeThickness = 0
         self.edgeThickness = 1
 
         self.obstacles = []
-        self.obsdim = obsdim
-        self.obsnum = obsnum
+        self.obsDim = obsdim
+        self.obsNum = obsnum
 
         self.black = (0, 0, 0)
         self.grey = (75, 75, 75)
@@ -114,6 +114,64 @@ class RRTMap:
     def resetPath(self, path):
         for node in path:
             pygame.draw.circle(self.map, self.Blue, node, self.nodeRad+4, 0)
+
+    
+    def makeRandomShape(self):
+        shape_type = random.choice(["rect", "circle", "triangle"])
+
+        if shape_type == "rect":
+            x = random.randint(0, self.mapw - 30)
+            y = random.randint(0, self.maph - 30)
+            return "rect", pygame.Rect((x, y), (random.randint(30, self.obsDim), random.randint(30, self.obsDim)))
+
+        elif shape_type == "circle":
+            x = random.randint(self.obsDim, self.mapw - 30)
+            y = random.randint(self.obsDim, self.maph - 30)
+            radius = random.randint(30, self.obsDim) // 2
+            return "circle", ((x, y), radius)
+
+        elif shape_type == "triangle":
+            x1 = random.randint(0, self.mapw - 30)
+            y1 = random.randint(0, self.maph - 30)
+            x2 = x1 + random.randint(30, self.obsDim)
+            y2 = y1
+            x3 = x1 + random.randint(30, self.obsDim) // 2
+            y3 = y1 - random.randint(30, self.obsDim)
+            return "triangle", [(x1, y1), (x2, y2), (x3, y3)]
+
+    def makeobs(self):
+        obs = []
+        
+        # Create rectangles representing the goal and start as circles with radius 5
+        goal_circle = pygame.Rect(self.goal[0] - 5, self.goal[1] - 5, 10, 10)  # Circle with radius 5
+        start_circle = pygame.Rect(self.start[0] - 5, self.start[1] - 5, 10, 10)  # Circle with radius 5
+
+        for _ in range(self.obsNum):
+            shape = None
+            startGoalCol = True
+            while startGoalCol:
+                shape = self.makeRandomShape()
+                shape_type, properties = shape
+                if shape_type == "rect":
+                    # Rectangle properties (rectangular shape)
+                    rect = properties
+                    startGoalCol = rect.colliderect(goal_circle) or rect.colliderect(start_circle)
+                elif shape_type == "circle":
+                    # Circle properties (circle shape)
+                    circle_center, radius = properties
+                    circle_rect = pygame.Rect(circle_center[0] - radius, circle_center[1] - radius, 2 * radius, 2 * radius)
+                    startGoalCol = circle_rect.colliderect(goal_circle) or circle_rect.colliderect(start_circle)
+                elif shape_type == "triangle":
+                    # Triangle properties (triangle shape)
+                    triangle_rect = pygame.Rect(min(p[0] for p in properties), min(p[1] for p in properties),
+                                                self.obsDim, self.obsDim)
+                    startGoalCol = triangle_rect.colliderect(goal_circle) or triangle_rect.colliderect(start_circle)
+
+            obs.append(shape)
+
+        self.obstacles = obs.copy()
+        return obs
+    
 
     def drawObs(self, obstacles):
         for obs in obstacles:
@@ -214,7 +272,7 @@ class Ellipse:
         pygame.draw.line(surface, color, rotated_corners[3], rotated_corners[0], line_width)               
 
 class RRTGraph:
-    def __init__(self, start, goal, MapDimensions, obsdim, obsnum, surface):
+    def __init__(self, start, goal, MapDimensions, surface):
         (x, y) = start
         self.start = start
         self.goal = goal
@@ -222,20 +280,17 @@ class RRTGraph:
         self.num_not_in_ellipse = 0
         self.MapDimensions = MapDimensions
         self.maph, self.mapw = self.MapDimensions
+
         self.x = [x]
         self.y = [y]
         self.parent = [0]
         self.children = [set()]
         self.costs = [0]
-        self.best = None
         self.kdTree = KDTree([((x, y), 0)], 2)
+        self.best = None
         # self.rTree = RTree()
         # self.rTree.insert((x,y), 0)
         self.surface = surface
-
-        self.obstacles = []
-        self.obsDim = obsdim
-        self.obsNum = obsnum
 
         self.goalstate = set()
         self.path = []
@@ -246,62 +301,6 @@ class RRTGraph:
         pygame_array = pygame.surfarray.array3d(self.surface)
         self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
-    def makeRandomShape(self):
-        shape_type = random.choice(["rect", "circle", "triangle"])
-
-        if shape_type == "rect":
-            x = random.randint(0, self.mapw - 30)
-            y = random.randint(0, self.maph - 30)
-            return "rect", pygame.Rect((x, y), (random.randint(30, self.obsDim), random.randint(30, self.obsDim)))
-
-        elif shape_type == "circle":
-            x = random.randint(self.obsDim, self.mapw - 30)
-            y = random.randint(self.obsDim, self.maph - 30)
-            radius = random.randint(30, self.obsDim) // 2
-            return "circle", ((x, y), radius)
-
-        elif shape_type == "triangle":
-            x1 = random.randint(0, self.mapw - 30)
-            y1 = random.randint(0, self.maph - 30)
-            x2 = x1 + random.randint(30, self.obsDim)
-            y2 = y1
-            x3 = x1 + random.randint(30, self.obsDim) // 2
-            y3 = y1 - random.randint(30, self.obsDim)
-            return "triangle", [(x1, y1), (x2, y2), (x3, y3)]
-
-    def makeobs(self):
-        obs = []
-        
-        # Create rectangles representing the goal and start as circles with radius 5
-        goal_circle = pygame.Rect(self.goal[0] - 5, self.goal[1] - 5, 10, 10)  # Circle with radius 5
-        start_circle = pygame.Rect(self.start[0] - 5, self.start[1] - 5, 10, 10)  # Circle with radius 5
-
-        for _ in range(self.obsNum):
-            shape = None
-            startGoalCol = True
-            while startGoalCol:
-                shape = self.makeRandomShape()
-                shape_type, properties = shape
-                if shape_type == "rect":
-                    # Rectangle properties (rectangular shape)
-                    rect = properties
-                    startGoalCol = rect.colliderect(goal_circle) or rect.colliderect(start_circle)
-                elif shape_type == "circle":
-                    # Circle properties (circle shape)
-                    circle_center, radius = properties
-                    circle_rect = pygame.Rect(circle_center[0] - radius, circle_center[1] - radius, 2 * radius, 2 * radius)
-                    startGoalCol = circle_rect.colliderect(goal_circle) or circle_rect.colliderect(start_circle)
-                elif shape_type == "triangle":
-                    # Triangle properties (triangle shape)
-                    triangle_rect = pygame.Rect(min(p[0] for p in properties), min(p[1] for p in properties),
-                                                self.obsDim, self.obsDim)
-                    startGoalCol = triangle_rect.colliderect(goal_circle) or triangle_rect.colliderect(start_circle)
-
-            obs.append(shape)
-
-        self.obstacles = obs.copy()
-        return obs
-    
     def updateKDTree(self):
         self.kdTree = KDTree([((self.x[i], self.y[i]), i) for i in range(self.number_of_nodes())], 2)
 
@@ -309,24 +308,13 @@ class RRTGraph:
         self.x.insert(n,x)
         self.y.insert(n,y)
 
-    def remove_node(self, n):
-        self.x.pop(n)
-        self.y.pop(n)
-
     def add_edge(self, parent, child):
         self.parent.insert(child, parent)
         self.children[parent].add(child)
         self.children.insert(child, set())
 
-    def remove_edge(self, n):
-        self.children[self.parent[n]].remove(n)
-        self.children.pop(n)
-        self.parent.pop(n)
-
     def add_cost(self, node, cost):
         self.costs.insert(node, cost)
-    def remove_cost(self, node):
-        self.costs.pop(node)
 
     def number_of_nodes(self):
         return len(self.x)
@@ -348,19 +336,6 @@ class RRTGraph:
                 break
         return x,y
 
-    def nearest(self, node):
-        query_point = (self.x[node], self.y[node])
-        nearest_neighbor = self.kdTree.get_nearest(query_point)
-        return nearest_neighbor[2]
-
-    def isFree(self):
-        n = self.number_of_nodes() - 1
-        try: color_at_node = self.obstacle_grid[self.x[n], self.y[n]]
-        except Exception as e:
-            print(n, self.x[n], self.y[n])
-            raise e
-        return not color_at_node
-    
     def dist_points(self, p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
@@ -402,13 +377,6 @@ class RRTGraph:
             points.append((x, y))
         
         return points
-
-    def connect(self, nearest, node):
-        if self.cross_obstacle(nearest, node):
-            self.remove_node(node)
-            return False
-        self.add_edge(nearest, node)
-        return True
     
     def is_ancestor(self, potential_ancestor, node):
         current = node
@@ -550,9 +518,9 @@ def main():
 
     pygame.init()
     map = RRTMap(start, goal, dimensions, obsdim, obsnum)
-    graph = RRTGraph(start, goal, dimensions, obsdim, obsnum, map.map)
+    graph = RRTGraph(start, goal, dimensions, map.map)
 
-    obstacles = graph.makeobs()
+    obstacles = map.makeobs()
     # confined = [    ('rect', (794, 5, 45, 39)),    ('triangle', [(918, 364), (978, 364), (941, 315)]),    ('triangle', [(230, 98), (272, 98), (254, 46)]),    ('rect', (323, 226, 40, 56)),    ('triangle', [(670, 547), (724, 547), (695, 505)]),    ('triangle', [(873, 359), (931, 359), (901, 307)]),    ('circle', ((617, 232), 28)),    ('rect', (645, 478, 54, 57)),    ('circle', ((168, 243), 21)),    ('rect', (438, 427, 55, 37)),    ('circle', ((590, 551), 27)),    ('rect', (588, 23, 43, 41)),    ('triangle', [(876, 465), (925, 465), (900, 412)]),    ('circle', ((324, 554), 17)),    ('rect', (386, 363, 51, 32)),    ('circle', ((418, 60), 17)),    ('rect', (105, 84, 52, 37)),    ('triangle', [(54, 84), (102, 84), (83, 53)]),    ('circle', ((541, 567), 28)),    ('circle', ((830, 291), 20)),    ('rect', (845, 88, 50, 39)),    ('triangle', [(916, 8), (956, 8), (943, -44)]),    ('circle', ((359, 406), 28)),    ('triangle', [(175, 416), (235, 416), (198, 369)]),    ('circle', ((412, 206), 26)),    ('rect', (380, 45, 49, 31)),    ('circle', ((440, 264), 22)),    ('rect', (174, 461, 45, 53)),    ('circle', ((310, 538), 24)),    ('rect', (68, 565, 45, 44)),    ('rect', (653, 196, 60, 40)),    ('triangle', [(376, 449), (422, 449), (391, 394)]),    ('triangle', [(0, 319), (48, 319), (16, 264)]),    ('rect', (565, 234, 42, 34)),    ('circle', ((530, 184), 26)),    ('triangle', [(728, 112), (766, 112), (745, 52)]),    ('circle', ((683, 339), 15)),    ('triangle', [(864, 140), (919, 140), (887, 93)]),    ('triangle', [(636, 163), (670, 163), (664, 118)]),    ('rect', (40, 2, 35, 54)),    ('triangle', [(931, 507), (971, 507), (958, 456)]),    ('triangle', [(339, 493), (387, 493), (366, 458)]),    ('rect', (135, 552, 45, 45)),    ('circle', ((245, 517), 16)),    ('circle', ((350, 181), 15)),    ('circle', ((119, 187), 30)),    ('circle', ((223, 151), 29)),    ('rect', (92, 108, 53, 39)),    ('rect', (327, 267, 31, 57)),    ('triangle', [(798, 174), (835, 174), (823, 133)])]
     # obstacles = confined
     map.drawMap(obstacles)
