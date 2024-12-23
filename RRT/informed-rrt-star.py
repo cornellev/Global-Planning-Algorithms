@@ -237,8 +237,7 @@ class RRTGraph:
         self.obsDim = obsdim
         self.obsNum = obsnum
 
-        self.goalstate = []
-        self.goal_parents = set()
+        self.goalstate = set()
         self.path = []
         self.ellipse = None
     
@@ -436,7 +435,7 @@ class RRTGraph:
             point = self.goal
             foundGoal = True
 
-        neighbors = [i[2] for i in self.kdTree.get_knn(point, min(10, max(5, len(self.x) // 10)), True) if i[2] != node and not (foundGoal and i[2] in self.goal_parents) and not self.cross_obstacle_points(i[1], point)]
+        neighbors = [i[2] for i in self.kdTree.get_knn(point, min(10, max(5, len(self.x) // 10)), True) if i[2] != node and not (foundGoal and i[2] in self.goalstate) and not self.cross_obstacle_points(i[1], point)]
 
         # bad radial method
         # neighbors = [i for i in range(self.number_of_nodes()) if self.calcDistance(self.x[node], self.y[node], self.x[i], self.y[i]) <= dmax and i != node]
@@ -454,8 +453,7 @@ class RRTGraph:
         if node == self.number_of_nodes()-1: self.add_cost(node, dist + self.costs[self.parent[node]])
 
         if foundGoal:
-            self.goalstate.append(node)
-            self.goal_parents.add(node)
+            self.goalstate.add(node)
             if not self.goalFlag: self.num_not_in_ellipse = self.number_of_nodes()
             self.goalFlag = foundGoal = True
             
