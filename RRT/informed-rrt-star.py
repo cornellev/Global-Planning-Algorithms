@@ -2,6 +2,7 @@ import random
 import math
 import pygame
 import numpy as np
+from scipy.ndimage import binary_dilation
 import heapq
 
 class KDTree(object):
@@ -105,11 +106,11 @@ class RRTMap:
         pygame.draw.circle(self.map, self.Green, self.goal, self.nodeRad + 5, 0)
         self.drawObs(obstacles)
 
-    def drawPath(self, path):
+    def drawPath(self, path, from_goal = False):
         for i in range(len(path)):
             pygame.draw.circle(self.map, self.Red, path[i], self.nodeRad + 4, 0)
             if i < len(path) - 1:
-                pygame.draw.line(self.map, self.Red, path[i], path[i + 1], self.nodeRad + 3)
+                pygame.draw.line(self.map, self.Red if not from_goal else (250,95,85), path[i], path[i + 1], self.nodeRad +  3)
 
     def resetPath(self, path):
         for node in path:
@@ -272,6 +273,18 @@ class Ellipse:
         pygame.draw.line(surface, color, rotated_corners[3], rotated_corners[0], line_width)               
 
 class RRTGraph:
+    class Node:
+        def __init__(self, x, y, parent=None, children=None, cost=None):
+            self.x = x
+            self.y = y
+            self.parent = parent
+            self.children = children or set()
+            self.cost = cost
+        def set_parent(self, parent): self.parent = parent
+        def set_cost(self, cost): self.cost = cost
+        def add_child(self, child): self.children.add(child)
+        def remove_child(self, child): self.children.remove(child)
+
     def __init__(self, start, goal, MapDimensions, surface):
         (x, y) = start
         self.start = start
@@ -280,20 +293,25 @@ class RRTGraph:
         self.num_not_in_ellipse = 0
         self.MapDimensions = MapDimensions
         self.maph, self.mapw = self.MapDimensions
+        self.iter = 0
 
-        self.x = [x]
-        self.y = [y]
-        self.parent = [0]
-        self.children = [set()]
-        self.costs = [0]
+        self.nodes = {0: self.Node(x, y, cost=0)}
         self.kdTree = KDTree([((x, y), 0)], 2)
+        
+        self.goal_nodes = {0: self.Node(goal[0], goal[1], cost=0)}
+        self.goal_kdTree = KDTree([(goal, 0)], 2)
+
+        self.cur_tree = self.nodes
+
         self.best = None
         # self.rTree = RTree()
         # self.rTree.insert((x,y), 0)
         self.surface = surface
 
         self.goalstate = set()
+        self.startstate = set()
         self.path = []
+        self.from_goal = None
         self.ellipse = None
     
     def cache_obstacle_grid(self):
@@ -301,29 +319,43 @@ class RRTGraph:
         pygame_array = pygame.surfarray.array3d(self.surface)
         self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
+        # Applies minimum distance that must be kept from obstacles:
+        # structure = np.ones((21, 21), dtype=bool) # radius 10
+        # self.obstacle_grid = binary_dilation(self.obstacle_grid, structure=structure)
+
     def updateKDTree(self):
-        self.kdTree = KDTree([((self.x[i], self.y[i]), i) for i in range(self.number_of_nodes())], 2)
+        self.kdTree = KDTree([((self.nodes[i].x, self.nodes[i].y), i) for i in range(len(self.nodes))], 2)
+        self.goal_kdTree = KDTree([((self.goal_nodes[i].x, self.goal_nodes[i].y), i) for i in range(len(self.goal_nodes))], 2)
 
-    def add_node(self, n, x, y):
-        self.x.insert(n,x)
-        self.y.insert(n,y)
+    def add_node(self, n, x, y, nodes=None):
+        nodes = nodes or self.cur_tree
+        nodes[n] = self.Node(x,y)
 
-    def add_edge(self, parent, child):
-        self.parent.insert(child, parent)
-        self.children[parent].add(child)
-        self.children.insert(child, set())
+    def add_edge(self, parent, child, nodes=None):
+        nodes = nodes or self.cur_tree
+        nodes[child].set_parent(parent)
+        nodes[parent].add_child(child)
 
-    def add_cost(self, node, cost):
-        self.costs.insert(node, cost)
+    def rewire_edge(self, parent, old_child, new_child, nodes=None):
+        nodes = nodes or self.cur_tree
+        nodes[parent].remove_child(old_child)
+        nodes[old_child].parent = new_child
+        nodes[new_child].add_child(old_child)
 
-    def number_of_nodes(self):
-        return len(self.x)
 
-    def distance(self, n1, n2):
-        return math.sqrt((float(self.x[n1]) - float(self.x[n2])) ** 2 + (float(self.y[n1]) - float(self.y[n2])) ** 2)
+    def add_cost(self, node, cost, nodes=None):
+        nodes = nodes or self.cur_tree
+        nodes[node].set_cost(cost)
+
+    def distance(self, n1, n2, nodes=None):
+        nodes = nodes or self.cur_tree
+        return math.sqrt((float(nodes[n1].x) - float(nodes[n2].x)) ** 2 + (float(nodes[n1].y) - float(nodes[n2].y)) ** 2)
     
     def calcDistance(self, x1, y1, x2, y2):
         return math.sqrt((float(x1) - float(x2))**2 + (float(y1) - float(y2))**2)
+    
+    def dist_points(self, p1, p2):
+        return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
 
     def sample_envir(self):
         while True:
@@ -336,9 +368,6 @@ class RRTGraph:
                 break
         return x,y
 
-    def dist_points(self, p1, p2):
-        return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
-
     def cross_obstacle_points(self, startPoint, endPoint):
         line_length = self.dist_points(startPoint, endPoint)
         num_points = max(2, round(line_length / 3))
@@ -350,10 +379,11 @@ class RRTGraph:
                 return True
         return False
 
-    def cross_obstacle(self, startNode, endNode):
+    def cross_obstacle(self, startNode, endNode, nodes=None):
         try:
-            start_pos = (self.x[startNode], self.y[startNode])
-            end_pos = (self.x[endNode], self.y[endNode])
+            nodes = nodes or self.cur_tree
+            start_pos = (nodes[startNode].x, nodes[startNode].y)
+            end_pos = (nodes[endNode].x, nodes[endNode].y)
             
             return self.cross_obstacle_points(start_pos, end_pos)
         except Exception as e:
@@ -378,12 +408,13 @@ class RRTGraph:
         
         return points
     
-    def is_ancestor(self, potential_ancestor, node):
+    def is_ancestor(self, potential_ancestor, node, nodes=None):
+        nodes = nodes or self.cur_tree
         current = node
         visited = set()
         
         while current != 0:
-            current = self.parent[current]
+            current = nodes[current].parent
             if current == potential_ancestor:
                 return True
             if current in visited:
@@ -392,18 +423,22 @@ class RRTGraph:
         
         return False
 
-    def step(self, node, dmax=10, bias=False):
-
-        point = self.sample_envir() if not bias else self.goal
+    def step(self, node, dmax=10, bias=False, from_goal = False):
+        nodes = self.cur_tree
+        other_tree = self.nodes if from_goal else self.goal_nodes
+        kdTree = self.goal_kdTree if from_goal else self.kdTree
+        target = self.start if from_goal else self.goal
+        goalstate = self.startstate if from_goal else self.goalstate
+        point = self.sample_envir() if not bias else target
 
         foundGoal = bias
 
-        if not bias and abs(point[0] - self.goal[0]) < dmax and abs(point[1] - self.goal[1]) < dmax:
+        if not bias and abs(point[0] - target[0]) < dmax and abs(point[1] - target[1]) < dmax:
             # jump to goal
-            point = self.goal
+            point = target
             foundGoal = True
 
-        neighbors = [i[2] for i in self.kdTree.get_knn(point, min(10, max(5, len(self.x) // 10)), True) if i[2] != node and not (foundGoal and i[2] in self.goalstate) and not self.cross_obstacle_points(i[1], point)]
+        neighbors = [i[2] for i in kdTree.get_knn(point, min(10, max(5, len(nodes) // 10)), True) if i[2] != node and not (foundGoal and i[2] in goalstate) and not self.cross_obstacle_points(i[1], point)]
 
         # bad radial method
         # neighbors = [i for i in range(self.number_of_nodes()) if self.calcDistance(self.x[node], self.y[node], self.x[i], self.y[i]) <= dmax and i != node]
@@ -412,21 +447,52 @@ class RRTGraph:
         if not len(neighbors):
             return
 
-        bestNeighbor = min(neighbors, key=lambda i: self.costs[i])
+        bestNeighbor = min(neighbors, key=lambda i: nodes[i].cost)
 
         self.add_node(node, point[0], point[1])
         self.add_edge(bestNeighbor, node)
         
         dist = self.distance(bestNeighbor, node)
-        if node == self.number_of_nodes()-1: self.add_cost(node, dist + self.costs[self.parent[node]])
+        if node == len(nodes) - 1: self.add_cost(node, dist + nodes[nodes[node].parent].cost)
+
+        for i in range(0, len(neighbors)):
+            neighbor = neighbors[i]
+            if neighbor == bestNeighbor: continue
+            dist_to_neighbor = self.distance(neighbor, node)
+            neighborCost = nodes[node].cost + dist_to_neighbor
+            if neighborCost < nodes[neighbor].cost and not self.is_ancestor(neighbor, node):
+                nodes[neighbor].set_cost(neighborCost)
+
+                if nodes[neighbor].cost <= 0:
+                    # print(dist, dist_to_neighbor, neighbor, node, self.x[neighbor], self.y[neighbor], self.x[node], self.y[node])
+                    raise Exception("Costs are negative")
+
+                self.rewire_edge(nodes[neighbor].parent, neighbor, node)
+
+                if nodes[nodes[neighbor].parent].cost > nodes[neighbor].cost:
+                    # print(self.parent[neighbor], neighbor, self.costs[self.parent[neighbor]], self.costs[neighbor])
+                    raise Exception("Parent cost is greater than the child cost")
+
+                stack = [nodes[neighbor].children]
+                while stack:
+                    for child in stack.pop():
+                        nodes[child].set_cost(nodes[nodes[child].parent].cost + self.distance(nodes[child].parent, child))
+                        stack.append(nodes[child].children)
+
+        # TODO: Connect nearest node to node from other tree, which will give a solution for both trees
+        # TODO: Prune trees for things above cost, figure out better metric than density to determine convergence
 
         if foundGoal:
-            self.goalstate.add(node)
-            if not self.goalFlag: self.num_not_in_ellipse = self.number_of_nodes()
+            goalstate.add(node)
+            if not self.goalFlag: self.num_not_in_ellipse = len(nodes)
             self.goalFlag = foundGoal = True
+            old_from_goal = self.from_goal
+            old_best = self.best
             
+            self.from_goal = from_goal
             self.path_to_goal()
-            pathLength = self.costs[self.best]
+
+            pathLength = nodes[self.best].cost
 
             if (not self.ellipse) or (pathLength < self.ellipse.a * 2):
                 self.ellipse = Ellipse(
@@ -437,68 +503,55 @@ class RRTGraph:
                     self.maph,
                     self.obstacle_grid
                 )
+            else:
+                self.from_goal = old_from_goal
+                self.best = old_best
 
-        for i in range(0, len(neighbors)):
-            neighbor = neighbors[i]
-            if neighbor == bestNeighbor: continue
-            dist_to_neighbor = self.distance(neighbor, node)
-            neighborCost = self.costs[node] + dist_to_neighbor
-            if neighborCost < self.costs[neighbor] and not self.is_ancestor(neighbor, node):
-                self.costs[neighbor] = neighborCost
+        kdTree.add_point((point, node))
 
-                if self.costs[neighbor] <= 0:
-                    # print(dist, dist_to_neighbor, neighbor, node, self.x[neighbor], self.y[neighbor], self.x[node], self.y[node])
-                    raise Exception("Costs are negative")
-
-                self.children[self.parent[neighbor]].remove(neighbor)
-                self.parent[neighbor] = node
-                self.children[node].add(neighbor)
-
-                if self.costs[self.parent[neighbor]] > self.costs[neighbor]:
-                    # print(self.parent[neighbor], neighbor, self.costs[self.parent[neighbor]], self.costs[neighbor])
-                    raise Exception("Parent cost is greater than the child cost")
-
-                stack = [self.children[neighbor]]
-                while stack:
-                    for child in stack.pop():
-                        self.costs[child] = self.costs[self.parent[child]] + self.distance(self.parent[child], child)
-                        stack.append(self.children[child])
-
-        self.kdTree.add_point((point, node))
-
-        if not foundGoal and self.dist_points(point, self.goal) <= 50:
-            self.step(self.number_of_nodes(), bias = True)
+        if not foundGoal and not from_goal and self.dist_points(point, self.goal) <= 50:
+            self.step(len(self.nodes), bias = True)
 
     def path_to_goal(self):
+        nodes = self.nodes if not self.from_goal else self.goal_nodes
+        goalstate = self.startstate if self.from_goal else self.goalstate
         if self.goalFlag:
             self.path = []
-            self.best = min(self.goalstate, key = lambda i: self.costs[i])
+            self.best = min(goalstate, key = lambda i: nodes[i].cost)
             self.path.append(self.best)
-            newpoint = self.parent[self.best]
+            newpoint = nodes[self.best].parent
             while newpoint != 0:
                 self.path.append(newpoint)
-                newpoint = self.parent[newpoint]
+                newpoint = nodes[newpoint].parent
             self.path.append(0)
         return self.goalFlag
 
     def getPathCoords(self):
+        nodes = self.nodes if not self.from_goal else self.goal_nodes
         pathCoords = []
         for i in self.path:
-            pathCoords.append((self.x[i], self.y[i]))
+            pathCoords.append((nodes[i].x, nodes[i].y))
         return pathCoords
 
     def bias(self):
-        n = self.number_of_nodes()
+        n = len(self.nodes)
         self.step(n, bias=True)
-        return self.x, self.y, self.parent
+        return self.nodes, self.goal_nodes
 
     def expand(self):
-        n = self.number_of_nodes()
-        self.step(n)
-        return self.x, self.y, self.parent
+        n = len(self.nodes)
+        n_goal = len(self.goal_nodes)
 
-    def cost(self):
-        return self.cost
+        if self.iter % 2 == 0:
+            self.iter = 0
+            self.cur_tree = self.nodes
+            self.step(n)
+        else:
+            self.cur_tree = self.goal_nodes
+            self.step(n_goal, from_goal=True)
+        self.iter += 1
+        return self.nodes, self.goal_nodes
+
 
 def waitClick():
     click = False
@@ -524,7 +577,6 @@ def main():
     # confined = [    ('rect', (794, 5, 45, 39)),    ('triangle', [(918, 364), (978, 364), (941, 315)]),    ('triangle', [(230, 98), (272, 98), (254, 46)]),    ('rect', (323, 226, 40, 56)),    ('triangle', [(670, 547), (724, 547), (695, 505)]),    ('triangle', [(873, 359), (931, 359), (901, 307)]),    ('circle', ((617, 232), 28)),    ('rect', (645, 478, 54, 57)),    ('circle', ((168, 243), 21)),    ('rect', (438, 427, 55, 37)),    ('circle', ((590, 551), 27)),    ('rect', (588, 23, 43, 41)),    ('triangle', [(876, 465), (925, 465), (900, 412)]),    ('circle', ((324, 554), 17)),    ('rect', (386, 363, 51, 32)),    ('circle', ((418, 60), 17)),    ('rect', (105, 84, 52, 37)),    ('triangle', [(54, 84), (102, 84), (83, 53)]),    ('circle', ((541, 567), 28)),    ('circle', ((830, 291), 20)),    ('rect', (845, 88, 50, 39)),    ('triangle', [(916, 8), (956, 8), (943, -44)]),    ('circle', ((359, 406), 28)),    ('triangle', [(175, 416), (235, 416), (198, 369)]),    ('circle', ((412, 206), 26)),    ('rect', (380, 45, 49, 31)),    ('circle', ((440, 264), 22)),    ('rect', (174, 461, 45, 53)),    ('circle', ((310, 538), 24)),    ('rect', (68, 565, 45, 44)),    ('rect', (653, 196, 60, 40)),    ('triangle', [(376, 449), (422, 449), (391, 394)]),    ('triangle', [(0, 319), (48, 319), (16, 264)]),    ('rect', (565, 234, 42, 34)),    ('circle', ((530, 184), 26)),    ('triangle', [(728, 112), (766, 112), (745, 52)]),    ('circle', ((683, 339), 15)),    ('triangle', [(864, 140), (919, 140), (887, 93)]),    ('triangle', [(636, 163), (670, 163), (664, 118)]),    ('rect', (40, 2, 35, 54)),    ('triangle', [(931, 507), (971, 507), (958, 456)]),    ('triangle', [(339, 493), (387, 493), (366, 458)]),    ('rect', (135, 552, 45, 45)),    ('circle', ((245, 517), 16)),    ('circle', ((350, 181), 15)),    ('circle', ((119, 187), 30)),    ('circle', ((223, 151), 29)),    ('rect', (92, 108, 53, 39)),    ('rect', (327, 267, 31, 57)),    ('triangle', [(798, 174), (835, 174), (823, 133)])]
     # obstacles = confined
     map.drawMap(obstacles)
-    graph.cache_obstacle_grid()
 
     pygame.display.update()
     pygame.event.clear()
@@ -536,20 +588,46 @@ def main():
     font = pygame.font.Font(None, 36)
 
     isSolved = False
+    graph.cache_obstacle_grid()
     graph.bias()
+
+    def updateDisplay(nodes, goal_nodes, isSolved):
+        map.map.fill((255,255,255))
+        map.drawMap(obstacles)
+        timer_text = font.render(f"Time: {elapsed_time:.2f} s", True, (0, 0, 0))
+        map.map.blit(timer_text, (10, 10))
+        
+        for i in range(len(nodes)):
+            pygame.draw.circle(map.map, map.grey if (nodes[i].x != goal[0] or nodes[i].y != goal[1]) and (nodes[i].x != start[0] or nodes[i].y != start[1]) else map.Red, (nodes[i].x, nodes[i].y), map.nodeRad+1)
+            if nodes[i].parent is not None:
+                pygame.draw.line(map.map, map.Blue, (nodes[i].x, nodes[i].y), (nodes[nodes[i].parent].x, nodes[nodes[i].parent].y), map.edgeThickness)
+        for i in range(len(goal_nodes)):
+            pygame.draw.circle(map.map, map.grey, (goal_nodes[i].x, goal_nodes[i].y), map.nodeRad+1)
+            if goal_nodes[i].parent is not None:
+                pygame.draw.line(map.map, map.Green, (goal_nodes[i].x, goal_nodes[i].y), (goal_nodes[goal_nodes[i].parent].x, goal_nodes[goal_nodes[i].parent].y), map.edgeThickness)
+        if isSolved:
+            graph.ellipse.draw_bounding_rectangle(map.map)
+            nodes = graph.goal_nodes if graph.from_goal else graph.nodes
+            if abs(nodes[graph.best].cost - distToGoal) < 1:
+                pygame.display.update()
+                return True
+            graph.path_to_goal()
+            map.drawPath(graph.getPathCoords(), graph.from_goal)
+            pygame.display.update()
     while True:
         current_time = pygame.time.get_ticks()
         elapsed_time = (current_time - start_time) / 1000.0
         if graph.num_not_in_ellipse and graph.ellipse:
             area = graph.ellipse.get_area()
-            if area and ((graph.number_of_nodes() - graph.num_not_in_ellipse) / max(math.log(area + 1), 0.8) > 600):
+            if area and ((len(graph.nodes)+len(graph.goal_nodes) - graph.num_not_in_ellipse) / max(math.log(area + 2), 0.8) > 600):
                 break
         # if iteration % 1000 == 0:
         #     X, Y, Parent = graph.bias()
         #     pygame.draw.circle(map.map, map.grey, (X[-1], Y[-1]), map.nodeRad, map.nodeRad + 4, 0)
         #     pygame.draw.line(map.map, map.Blue, (X[-1], Y[-1]), (X[Parent[-1]], Y[Parent[-1]]), map.edgeThickness)
         # else:
-        X, Y, Parent = graph.expand()
+        nodes, goal_nodes = graph.expand()
+        
         #     pygame.draw.circle(map.map, map.grey, (X[-1], Y[-1]), map.nodeRad+4)
         #     pygame.draw.line(map.map, map.Blue, (X[-1], Y[-1]), (X[Parent[-1]], Y[Parent[-1]]), map.edgeThickness)
         if iteration % 500 == 0:
@@ -558,26 +636,7 @@ def main():
         
         if not isSolved: isSolved = graph.path_to_goal()
         if iteration % 1000 == 0:
-            map.map.fill((255,255,255))
-            map.drawMap(obstacles)
-            
-            for i in range(len(X)):
-                pygame.draw.circle(map.map, map.grey if (X[i] != goal[0] or Y[i] != goal[1]) and (X[i] != start[0] or Y[i] != start[1]) else map.Red, (X[i], Y[i]), map.nodeRad+1)
-                if Parent[i] is not None:
-                    pygame.draw.line(map.map, map.Blue, (X[i], Y[i]), (X[Parent[i]], Y[Parent[i]]), map.edgeThickness)
-            timer_text = font.render(f"Time: {elapsed_time:.2f} s", True, (0, 0, 0))
-            map.map.blit(timer_text, (10, 10))
-            if isSolved:
-                graph.path_to_goal()
-                pygame.display.update()
-                path = graph.getPathCoords()
-                graph.ellipse.draw_bounding_rectangle(map.map)
-                map.drawPath(path)
-                if abs(graph.costs[graph.best] - distToGoal) < 1:
-                    pygame.display.update()
-                    break
-
-            pygame.display.update()
+            if updateDisplay(nodes, goal_nodes, isSolved): break
             # waitClick()
             graph.path = []
 
@@ -585,9 +644,9 @@ def main():
     
     current_time = pygame.time.get_ticks()
     elapsed_time = (current_time - start_time) / 1000.0
+    updateDisplay(nodes, goal_nodes, True)
     timer_text = font.render(f"Total Time: {elapsed_time:.2f} s", True, (16, 150, 34))
     map.map.blit(timer_text, (10, 30))
-    map.drawPath(graph.getPathCoords())
     pygame.display.update()
     pygame.event.clear()
     if waitClick(): print(obstacles)
