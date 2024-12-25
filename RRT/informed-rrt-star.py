@@ -304,6 +304,7 @@ class RRTGraph:
         self.cur_tree = self.nodes
 
         self.best = None
+        self.bestCost = float('inf')
         # self.rTree = RTree()
         # self.rTree.insert((x,y), 0)
         self.surface = surface
@@ -423,12 +424,35 @@ class RRTGraph:
         
         return False
 
+    def getCost(self, parent, child, nodes=None):
+        nodes = nodes or self.cur_tree
+        return nodes[parent].cost + self.distance(parent, child, nodes)
+
+    def mergeTrees(self, node, cur_other, kdTree, nodes, other_nodes):
+        cur_this = len(nodes)-1
+        prev = node
+        i = 0
+        while True:
+            if i==1: prev = cur_this
+            cur_this += 1
+            other_node = other_nodes[cur_other]
+            self.add_node(cur_this, other_node.x, other_node.y, nodes)
+            self.add_edge(prev, cur_this, nodes)
+            nodes[cur_this].set_cost(self.getCost(prev, cur_this, nodes))
+            kdTree.add_point(((other_node.x, other_node.y), cur_this))
+            if cur_other == 0: break
+            cur_other = other_node.parent
+            i = 1
+        return cur_this
+
     def step(self, node, dmax=10, bias=False, from_goal = False):
         nodes = self.cur_tree
-        other_tree = self.nodes if from_goal else self.goal_nodes
+        other_nodes = self.nodes if from_goal else self.goal_nodes
         kdTree = self.goal_kdTree if from_goal else self.kdTree
+        other_kdTree = self.kdTree if from_goal else self.goal_kdTree
         target = self.start if from_goal else self.goal
         goalstate = self.startstate if from_goal else self.goalstate
+        other_goalstate = self.goalstate if from_goal else self.startstate
         point = self.sample_envir() if not bias else target
 
         foundGoal = bias
@@ -458,8 +482,7 @@ class RRTGraph:
         for i in range(0, len(neighbors)):
             neighbor = neighbors[i]
             if neighbor == bestNeighbor: continue
-            dist_to_neighbor = self.distance(neighbor, node)
-            neighborCost = nodes[node].cost + dist_to_neighbor
+            neighborCost = self.getCost(node, neighbor)
             if neighborCost < nodes[neighbor].cost and not self.is_ancestor(neighbor, node):
                 nodes[neighbor].set_cost(neighborCost)
 
@@ -476,54 +499,62 @@ class RRTGraph:
                 stack = [nodes[neighbor].children]
                 while stack:
                     for child in stack.pop():
-                        nodes[child].set_cost(nodes[nodes[child].parent].cost + self.distance(nodes[child].parent, child))
+                        nodes[child].set_cost(self.getCost(nodes[child].parent, child))
                         stack.append(nodes[child].children)
 
-        # TODO: Connect nearest node to node from other tree, which will give a solution for both trees
+        # TODO: see if this connection logic makes sense
+        cur_this = node
+        if not foundGoal:
+            nearest_other = other_kdTree.get_nearest(point)
+            if nearest_other and nodes[node].cost + other_nodes[nearest_other[2]].cost < self.bestCost and self.dist_points(point, nearest_other[1]) < 20  and not self.cross_obstacle_points(point, nearest_other[1]):
+                cur_this = self.mergeTrees(node, nearest_other[2], kdTree, nodes, other_nodes)
+                other_goalstate.add(self.mergeTrees(nearest_other[2], node, other_kdTree, other_nodes, nodes))
+                foundGoal = True
         # TODO: Prune trees for things above cost, figure out better metric than density to determine convergence
 
+        kdTree.add_point((point, node))
         if foundGoal:
-            goalstate.add(node)
-            if not self.goalFlag: self.num_not_in_ellipse = len(nodes)
-            self.goalFlag = foundGoal = True
-            old_from_goal = self.from_goal
-            old_best = self.best
-            
-            self.from_goal = from_goal
-            self.path_to_goal()
+            self.num_not_in_ellipse = len(nodes)
+            self.goalFlag = True
+            goalstate.add(cur_this)
 
-            pathLength = nodes[self.best].cost
+            old_best = self.bestCost
+            self.path_to_goal(False)            
 
-            if (not self.ellipse) or (pathLength < self.ellipse.a * 2):
+            if self.bestCost < old_best:
+                if self.bestCost <= 0:
+                    raise Exception("Best path cost was negative: " + self.bestCost)
+
                 self.ellipse = Ellipse(
                     self.start,
                     self.goal,
-                    pathLength,
+                    self.bestCost,
                     self.mapw,
                     self.maph,
                     self.obstacle_grid
                 )
-            else:
-                self.from_goal = old_from_goal
-                self.best = old_best
-
-        kdTree.add_point((point, node))
 
         if not foundGoal and not from_goal and self.dist_points(point, self.goal) <= 50:
             self.step(len(self.nodes), bias = True)
 
-    def path_to_goal(self):
-        nodes = self.nodes if not self.from_goal else self.goal_nodes
-        goalstate = self.startstate if self.from_goal else self.goalstate
+    def path_to_goal(self, makePath = True):
         if self.goalFlag:
             self.path = []
-            self.best = min(goalstate, key = lambda i: nodes[i].cost)
-            self.path.append(self.best)
-            newpoint = nodes[self.best].parent
-            while newpoint != 0:
-                self.path.append(newpoint)
-                newpoint = nodes[newpoint].parent
-            self.path.append(0)
+            
+            best = min(self.goalstate, key = lambda i: self.nodes[i].cost) if len(self.goalstate) else -1
+            goal_best = min(self.startstate, key = lambda i: self.goal_nodes[i].cost) if len(self.startstate) else -1
+            if best == goal_best == -1: return self.goalFlag
+            self.from_goal = goal_best != -1 and (best == -1 or self.goal_nodes[goal_best].cost < self.nodes[best].cost)
+            self.best = goal_best if self.from_goal else best
+            nodes = self.goal_nodes if self.from_goal else self.nodes
+            self.bestCost = nodes[self.best].cost
+            if makePath:
+                self.path.append(self.best)
+                newpoint = nodes[self.best].parent
+                while newpoint != 0:
+                    self.path.append(newpoint)
+                    newpoint = nodes[newpoint].parent
+                self.path.append(0)
         return self.goalFlag
 
     def getPathCoords(self):
@@ -619,7 +650,7 @@ def main():
         elapsed_time = (current_time - start_time) / 1000.0
         if graph.num_not_in_ellipse and graph.ellipse:
             area = graph.ellipse.get_area()
-            if area and ((len(graph.nodes)+len(graph.goal_nodes) - graph.num_not_in_ellipse) / max(math.log(area + 2), 0.8) > 600):
+            if area and ((len(graph.nodes)+len(graph.goal_nodes) - graph.num_not_in_ellipse) / max(math.log(area + 2), 0.8) > 290):
                 break
         # if iteration % 1000 == 0:
         #     X, Y, Parent = graph.bias()
@@ -634,7 +665,7 @@ def main():
             graph.updateKDTree()
 
         
-        if not isSolved: isSolved = graph.path_to_goal()
+        if not isSolved: isSolved = graph.path_to_goal(False)
         if iteration % 1000 == 0:
             if updateDisplay(nodes, goal_nodes, isSolved): break
             # waitClick()
