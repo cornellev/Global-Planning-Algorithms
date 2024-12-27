@@ -8,22 +8,24 @@ import heapq
 class KDTree(object):
     def __init__(self, points, dim, dist_sq_func=None):
         if dist_sq_func is None:
-            dist_sq_func = lambda a, b: sum((x - b[i]) ** 2 
-                for i, x in enumerate(a))
+            dist_sq_func = lambda a, b: (a[0] - b.x) ** 2 + (a[1] - b.y) ** 2
+
+        def getXorY(node, i):
+            return node.x * (not i) + node.y * i 
                 
         def make(points, i=0):
             if len(points) > 1:
-                points.sort(key=lambda x: x[0][i])
+                points = sorted(points, key=lambda p: getXorY(p[1], i))
                 i = (i + 1) % dim
                 m = len(points) >> 1
                 return [make(points[:m], i), make(points[m + 1:], i), 
                     points[m]]
             if len(points) == 1:
-                return [None, None, points[0]]
+                return [None, None, list(points)[0]]
         
         def add_point(node, point, i=0):
             if node is not None:
-                dx = node[2][0][i] - point[0][i]
+                dx = getXorY(node[2][1], i) - getXorY(point[1], i)
                 for j, c in ((0, dx >= 0), (1, dx < 0)):
                     if c and node[j] is None:
                         node[j] = [None, None, point]
@@ -32,12 +34,12 @@ class KDTree(object):
 
         def get_knn(node, point, k, return_dist_sq, heap, i=0, tiebreaker=1):
             if node is not None:
-                dist_sq = dist_sq_func(point, node[2][0]) if not (node[2][0][0] == point[0] and node[2][0][1] == point[1]) else float('inf')
-                dx = node[2][0][i] - point[i]
+                dist_sq = dist_sq_func(point, node[2][1]) if not (node[2][1].x == point[0] and node[2][1].y == point[1]) else float('inf')
+                dx = getXorY(node[2][1], i) - point[i]
                 if len(heap) < k:
-                    heapq.heappush(heap, (-dist_sq, tiebreaker, node[2][0], node[2][1]))
+                    heapq.heappush(heap, (-dist_sq, tiebreaker, node[2][1], node[2][0]))
                 elif dist_sq < -heap[0][0]:
-                    heapq.heappushpop(heap, (-dist_sq, tiebreaker, node[2][0], node[2][1]))
+                    heapq.heappushpop(heap, (-dist_sq, tiebreaker, node[2][1], node[2][0]))
                 i = (i + 1) % dim
                 # Goes into the left branch, then the right branch if needed
                 for b in (dx < 0, dx >= 0)[:1 + (dx * dx < -heap[0][0])]:
@@ -296,10 +298,12 @@ class RRTGraph:
         self.iter = 0
 
         self.nodes = {0: self.Node(x, y, cost=0)}
-        self.kdTree = KDTree([((x, y), 0)], 2)
+        self.cur_index = 0
+        self.kdTree = KDTree(self.nodes.items(), 2)
         
         self.goal_nodes = {0: self.Node(goal[0], goal[1], cost=0)}
-        self.goal_kdTree = KDTree([(goal, 0)], 2)
+        self.cur_goal_index = 0
+        self.goal_kdTree = KDTree(self.goal_nodes.items(), 2)
 
         self.cur_tree = self.nodes
 
@@ -325,12 +329,14 @@ class RRTGraph:
         # self.obstacle_grid = binary_dilation(self.obstacle_grid, structure=structure)
 
     def updateKDTree(self):
-        self.kdTree = KDTree([((self.nodes[i].x, self.nodes[i].y), i) for i in range(len(self.nodes))], 2)
-        self.goal_kdTree = KDTree([((self.goal_nodes[i].x, self.goal_nodes[i].y), i) for i in range(len(self.goal_nodes))], 2)
+        self.kdTree = KDTree(self.nodes.items(), 2)
+        self.goal_kdTree = KDTree(self.goal_nodes.items(), 2)
 
     def add_node(self, n, x, y, nodes=None):
         nodes = nodes or self.cur_tree
+        from_goal = nodes == self.goal_nodes
         nodes[n] = self.Node(x,y)
+        if n == self.get_cur_index(from_goal) + 1: self.get_next_index(from_goal)
 
     def add_edge(self, parent, child, nodes=None):
         nodes = nodes or self.cur_tree
@@ -357,6 +363,9 @@ class RRTGraph:
     
     def dist_points(self, p1, p2):
         return math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+
+    def estimatedCost(self, x, y):
+        return self.calcDistance(x,y,self.start[0],self.start[1]) + self.calcDistance(x,y,self.goal[0],self.goal[1])
 
     def sample_envir(self):
         while True:
@@ -429,7 +438,7 @@ class RRTGraph:
         return nodes[parent].cost + self.distance(parent, child, nodes)
 
     def mergeTrees(self, node, cur_other, kdTree, nodes, other_nodes):
-        cur_this = len(nodes)-1
+        cur_this = self.get_cur_index(nodes==self.goal_nodes)
         prev = node
         i = 0
         while True:
@@ -439,13 +448,30 @@ class RRTGraph:
             self.add_node(cur_this, other_node.x, other_node.y, nodes)
             self.add_edge(prev, cur_this, nodes)
             nodes[cur_this].set_cost(self.getCost(prev, cur_this, nodes))
-            kdTree.add_point(((other_node.x, other_node.y), cur_this))
+            kdTree.add_point((cur_this, other_node))
             if cur_other == 0: break
             cur_other = other_node.parent
             i = 1
         return cur_this
 
-    def step(self, node, dmax=10, bias=False, from_goal = False):
+    def pruneTrees(self):
+        self.nodes = {n: v for n, v in self.nodes.items() if len(v.children) or (self.estimatedCost(v.x,v.y) <= self.bestCost) or ((v.parent in self.nodes and n in self.nodes[v.parent].children and self.nodes[v.parent].remove_child(n) and False) or (n in self.goalstate and self.goalstate.remove(n) and False))}
+        self.goal_nodes = {n: v for n, v in self.goal_nodes.items() if len(v.children) or (self.estimatedCost(v.x,v.y)) <= self.bestCost or ((v.parent in self.goal_nodes and n in self.goal_nodes[v.parent].children and self.goal_nodes[v.parent].remove_child(n) and False) or (n in self.startstate and self.startstate.remove(n) and False))}
+        self.updateKDTree()
+
+    def get_next_index(self, from_goal):
+        if from_goal:
+            self.cur_goal_index += 1
+            return self.cur_goal_index
+        else:
+            self.cur_index += 1
+            return self.cur_index
+
+    def get_cur_index(self, from_goal):
+        return self.cur_goal_index * from_goal + self.cur_index * (not from_goal)
+
+    def step(self, dmax=10, bias=False, from_goal = False):
+        node = self.get_cur_index(from_goal) + 1
         nodes = self.cur_tree
         other_nodes = self.nodes if from_goal else self.goal_nodes
         kdTree = self.goal_kdTree if from_goal else self.kdTree
@@ -462,7 +488,7 @@ class RRTGraph:
             point = target
             foundGoal = True
 
-        neighbors = [i[2] for i in kdTree.get_knn(point, min(10, max(5, len(nodes) // 10)), True) if i[2] != node and not (foundGoal and i[2] in goalstate) and not self.cross_obstacle_points(i[1], point)]
+        neighbors = [i[2] for i in kdTree.get_knn(point, min(10, max(5, len(nodes) // 10)), True) if i[2] != node and not (foundGoal and i[2] in goalstate) and not self.cross_obstacle_points((i[1].x, i[1].y), point)]
 
         # bad radial method
         # neighbors = [i for i in range(self.number_of_nodes()) if self.calcDistance(self.x[node], self.y[node], self.x[i], self.y[i]) <= dmax and i != node]
@@ -475,9 +501,9 @@ class RRTGraph:
 
         self.add_node(node, point[0], point[1])
         self.add_edge(bestNeighbor, node)
-        
+
         dist = self.distance(bestNeighbor, node)
-        if node == len(nodes) - 1: self.add_cost(node, dist + nodes[nodes[node].parent].cost)
+        if node == self.get_cur_index(from_goal): self.add_cost(node, dist + nodes[nodes[node].parent].cost)
 
         for i in range(0, len(neighbors)):
             neighbor = neighbors[i]
@@ -506,13 +532,14 @@ class RRTGraph:
         cur_this = node
         if not foundGoal:
             nearest_other = other_kdTree.get_nearest(point)
-            if nearest_other and nodes[node].cost + other_nodes[nearest_other[2]].cost < self.bestCost and self.dist_points(point, nearest_other[1]) < 20  and not self.cross_obstacle_points(point, nearest_other[1]):
+            nearest_other_point = (nearest_other[1].x, nearest_other[1].y)
+            if nearest_other and nodes[node].cost + other_nodes[nearest_other[2]].cost < self.bestCost and self.dist_points(point, nearest_other_point) < 20  and not self.cross_obstacle_points(point, nearest_other_point):
                 cur_this = self.mergeTrees(node, nearest_other[2], kdTree, nodes, other_nodes)
                 other_goalstate.add(self.mergeTrees(nearest_other[2], node, other_kdTree, other_nodes, nodes))
                 foundGoal = True
         # TODO: Prune trees for things above cost, figure out better metric than density to determine convergence
 
-        kdTree.add_point((point, node))
+        kdTree.add_point((node, nodes[node]))
         if foundGoal:
             self.num_not_in_ellipse = len(nodes)
             self.goalFlag = True
@@ -535,7 +562,7 @@ class RRTGraph:
                 )
 
         if not foundGoal and not from_goal and self.dist_points(point, self.goal) <= 50:
-            self.step(len(self.nodes), bias = True)
+            self.step(bias = True)
 
     def path_to_goal(self, makePath = True):
         if self.goalFlag:
@@ -565,21 +592,17 @@ class RRTGraph:
         return pathCoords
 
     def bias(self):
-        n = len(self.nodes)
-        self.step(n, bias=True)
+        self.step(bias=True)
         return self.nodes, self.goal_nodes
 
     def expand(self):
-        n = len(self.nodes)
-        n_goal = len(self.goal_nodes)
-
         if self.iter % 2 == 0:
             self.iter = 0
             self.cur_tree = self.nodes
-            self.step(n)
+            self.step()
         else:
             self.cur_tree = self.goal_nodes
-            self.step(n_goal, from_goal=True)
+            self.step(from_goal=True)
         self.iter += 1
         return self.nodes, self.goal_nodes
 
@@ -628,14 +651,14 @@ def main():
         timer_text = font.render(f"Time: {elapsed_time:.2f} s", True, (0, 0, 0))
         map.map.blit(timer_text, (10, 10))
         
-        for i in range(len(nodes)):
-            pygame.draw.circle(map.map, map.grey if (nodes[i].x != goal[0] or nodes[i].y != goal[1]) and (nodes[i].x != start[0] or nodes[i].y != start[1]) else map.Red, (nodes[i].x, nodes[i].y), map.nodeRad+1)
-            if nodes[i].parent is not None:
-                pygame.draw.line(map.map, map.Blue, (nodes[i].x, nodes[i].y), (nodes[nodes[i].parent].x, nodes[nodes[i].parent].y), map.edgeThickness)
-        for i in range(len(goal_nodes)):
-            pygame.draw.circle(map.map, map.grey, (goal_nodes[i].x, goal_nodes[i].y), map.nodeRad+1)
-            if goal_nodes[i].parent is not None:
-                pygame.draw.line(map.map, map.Green, (goal_nodes[i].x, goal_nodes[i].y), (goal_nodes[goal_nodes[i].parent].x, goal_nodes[goal_nodes[i].parent].y), map.edgeThickness)
+        for v in nodes.values():
+            pygame.draw.circle(map.map, map.grey if (v.x != goal[0] or v.y != goal[1]) and (v.x != start[0] or v.y != start[1]) else map.Red, (v.x, v.y), map.nodeRad+1)
+            if v.parent is not None:
+                pygame.draw.line(map.map, map.Blue, (v.x, v.y), (nodes[v.parent].x, nodes[v.parent].y), map.edgeThickness)
+        for v in goal_nodes.values():
+            pygame.draw.circle(map.map, map.grey, (v.x, v.y), map.nodeRad+1)
+            if v.parent is not None:
+                pygame.draw.line(map.map, map.Green, (v.x, v.y), (goal_nodes[v.parent].x, goal_nodes[v.parent].y), map.edgeThickness)
         if isSolved:
             graph.ellipse.draw_bounding_rectangle(map.map)
             nodes = graph.goal_nodes if graph.from_goal else graph.nodes
@@ -661,12 +684,13 @@ def main():
         
         #     pygame.draw.circle(map.map, map.grey, (X[-1], Y[-1]), map.nodeRad+4)
         #     pygame.draw.line(map.map, map.Blue, (X[-1], Y[-1]), (X[Parent[-1]], Y[Parent[-1]]), map.edgeThickness)
-        if iteration % 500 == 0:
-            graph.updateKDTree()
 
         
-        if not isSolved: isSolved = graph.path_to_goal(False)
+        if not isSolved: 
+            isSolved = graph.path_to_goal(False)
+            if iteration % 500 == 0: graph.updateKDTree()
         if iteration % 1000 == 0:
+            if isSolved:graph.pruneTrees()
             if updateDisplay(nodes, goal_nodes, isSolved): break
             # waitClick()
             graph.path = []
