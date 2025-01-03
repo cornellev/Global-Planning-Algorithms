@@ -606,6 +606,9 @@ class RRTGraph:
         self.iter += 1
         return self.nodes, self.goal_nodes
 
+    def num_in_ellipse(self):
+        return len(self.nodes)+len(self.goal_nodes) - self.num_not_in_ellipse if self.num_not_in_ellipse is not None else 0
+
 
 def waitClick():
     click = False
@@ -673,7 +676,7 @@ def main():
         elapsed_time = (current_time - start_time) / 1000.0
         if graph.num_not_in_ellipse and graph.ellipse:
             area = graph.ellipse.get_area()
-            if area and ((len(graph.nodes)+len(graph.goal_nodes) - graph.num_not_in_ellipse) / max(math.log(area + 2), 0.8) > 290):
+            if area and ((graph.num_in_ellipse()) / max(math.log(area + 2), 0.8) > 290):
                 break
         # if iteration % 1000 == 0:
         #     X, Y, Parent = graph.bias()
@@ -690,7 +693,8 @@ def main():
             isSolved = graph.path_to_goal(False)
             if iteration % 500 == 0: graph.updateKDTree()
         if iteration % 1000 == 0:
-            if isSolved:graph.pruneTrees()
+            if isSolved and graph.num_in_ellipse() / graph.bestCost < 2:
+                graph.pruneTrees()
             if updateDisplay(nodes, goal_nodes, isSolved): break
             # waitClick()
             graph.path = []
