@@ -621,7 +621,7 @@ def waitClick():
 def main():
     dimensions = (600, 1000)
     start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
-    goal = (random.randint(0, dimensions[0]- 1), random.randint(50, dimensions[0] - 1))
+    goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
     obsdim = 60
     obsnum = 50
     iteration = 0
