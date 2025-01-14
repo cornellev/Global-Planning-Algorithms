@@ -315,7 +315,7 @@ class SamplingRegion:
 
     def extension(self, e_i, sintheta, i):
         v = np.array([self.nodes[i].x, self.nodes[i].y])
-        e_i *= self.d / sintheta
+        e_i *= self.d / max(sintheta, 0.1)
 
         v_prime = self.clip(v + e_i)
         v_double_prime = self.clip(v - e_i)
@@ -350,25 +350,74 @@ class SamplingRegion:
     def sign(self, p1, center, p2):
         return (p1[0]-center[0])*(p2[1]-center[1])-(p1[1]-center[1])*(p2[0]-center[0]) <= 0
 
+    def slope(self, p1, p2):
+        x1, y1 = p1
+        x2, y2 = p2
+        if x2 == x1:
+            return float('inf') if y2 > y1 else -float('inf')
+        return (y2 - y1) / (x2 - x1)
+    
+    def slope_nodes(self, p1, p2):
+        x1, y1 = self.nodes[p1].x, self.nodes[p1].y
+        x2, y2 = self.nodes[p2].x, self.nodes[p2].y
+        if x2 == x1:
+            return float('inf') if y2 > y1 else -float('inf')
+        return (y2 - y1) / (x2 - x1)
+
+    def angle_pts(self, point1, point2):
+        r = math.atan2(point2[1] - point1[1], point2[0] - point1[0]) * 180/math.pi
+        return (r < 0) * 360 + r
+        # return math.atan2(point2[1] - point1[1], point2[0] - point1[0])
+
+    def angle_nodes(self, node1, node2):
+        return math.atan2(node2.y - node1.y, node2.x - node1.y)
+
+    def line_from_nodes(self, p1, p2):
+        a = p2.y - p1.y
+        b = p1.x - p2.x
+        c = a * p1.x + b * p1.y 
+        return (a, b, -c)
+
+    def point_line_side(self, line, p):
+        return line[0] * p[0] + line[1] * p[1] + line[2]
+
+    def segment_intersects_infinite_line(self, p1, p2, line):
+        side1 = self.point_line_side(line, p1)
+        side2 = self.point_line_side(line, p2)
+        return side1 * side2 < 0
+
     def precompute_region_data(self):
         total_area = 0
-        
         for i in range(len(self.path)-1):
-            c1,c2 = self.expanded_region[i]
-            n1,n2 = self.expanded_region[i+1]
+            quad = self.expanded_region[i] + self.expanded_region[i + 1]
 
-            if self.sign(c2,c1,n2) != self.sign(n2,n1,c2):
-                n1,n2=n2,n1
+            eq = self.line_from_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
+            if self.segment_intersects_infinite_line(quad[0], quad[3], eq):
+                if not self.segment_intersects_infinite_line(quad[0], quad[2], eq):
+                    quad[2],quad[3]=quad[3],quad[2]
+                elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq):
+                    quad[1],quad[3]=quad[3],quad[1]
+            # elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq) and math.dist(quad[0], quad[1]) < math.dist(quad[0], quad[3]):
+            #     quad[1],quad[3]=quad[3],quad[1]
+            # elif not self.segment_intersects_infinite_line(quad[0], quad[2], eq) and math.dist(quad[0], quad[2]) < math.dist(quad[0], quad[3]):
+            #     quad[2],quad[3]=quad[3],quad[2]
 
-            elif self.sign(c2,c1,n1) != self.sign(n2,c1,c2):
-                c1,n2=n2,c1
+            # angles = [(i, self.angle_pts(quad[0],quad[i])) for i in range(1, len(quad))]
+            # print(angles)
+            # C_index = sorted(angles, key=lambda x: x[1])[1][0]
+            # quad[2], quad[C_index] = quad[C_index], quad[2]
 
-            quad = (
-                c1,
-                c2,
-                n1,
-                n2
-            )
+            # if self.segment_intersects_infinite_line(quad[1], quad[2], *self.line_from_nodes(self.path[i], self.path[i+1])) and not self.segment_intersects_infinite_line(quad[0], quad[2], *self.line_from_nodes(self.path[i], self.path[i+1])):
+            #     quad[1],quad[2]=quad[2],quad[1]
+
+            # angle = self.angle_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
+            # D_index = 1 + min(
+            #     (0,2),
+            #     key = lambda i: abs(angle - angles[i][1])
+            # )
+
+            # quad[3], quad[D_index] = quad[D_index], quad[3]
+
             self.region_quads.append(quad)
             
             area1 = self.triangle_area(*quad[0], *quad[1], *quad[2])
@@ -376,7 +425,7 @@ class SamplingRegion:
             
             total_area += (area1 + area2)
             self.region_areas.append(total_area)
-            self.triangle_splits.append(area1 / (area1 + area2))  
+            self.triangle_splits.append(area1 / max((area1 + area2), 0.01))  
 
     def triangle_area(self, x1, y1, x2, y2, x3, y3):
         return abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0)
@@ -434,17 +483,41 @@ class SamplingRegion:
             v3,v4 = self.expanded_region[i+1]
             color = (random.random()*255, random.random()*255, random.random()*255)
 
-            # pygame.draw.circle(surface, color, v1, width+5)
-            # pygame.draw.circle(surface, color, v2, width+5)
-            pygame.draw.circle(surface, color, v3, width+5)
-            pygame.draw.circle(surface, color, v4, width+5)
+            pygame.draw.circle(surface, color, v1, width+7)
+            pygame.draw.circle(surface, color, v2, width+5)
+            # pygame.draw.circle(surface, color, v3, width+5)
+            # pygame.draw.circle(surface, color, v4, width+5)
+            
             quad = self.region_quads[i]
             pygame.draw.line(surface, color, quad[0], quad[3], width)
             pygame.draw.line(surface, color, quad[1], quad[2], width)
 
+            # quad = self.region_quads[i]
+            # edge_colors = [
+            #     (255, 0, 0),    # Red for edge 0 to 1
+            #     (0, 255, 0),    # Green for edge 1 to 2
+            #     (0, 0, 255),    # Blue for edge 0 to 2
+            #     (255, 255, 0),  # Yellow for edge 3 to 2
+            #     (255, 0, 255),  # Magenta for edge 0 to 3
+            # ]
+
+            # quad = self.region_quads[i]
+
+            # # Edge 0 to 1
+            # pygame.draw.line(surface, edge_colors[0], quad[0], quad[1], width)
+            # # Edge 1 to 2
+            # pygame.draw.line(surface, edge_colors[1], quad[1], quad[2], width)
+            # # Edge 0 to 2
+            # pygame.draw.line(surface, edge_colors[2], quad[0], quad[2], width)
+            # # Edge 3 to 2
+            # pygame.draw.line(surface, edge_colors[3], quad[3], quad[2], width)
+            # # Edge 0 to 3
+            # pygame.draw.line(surface, edge_colors[4], quad[0], quad[3], width)
+
         starts,ends = self.region_quads[0], self.region_quads[-1]
-        pygame.draw.line(surface, color, starts[0],starts[1])
-        pygame.draw.line(surface, color, ends[2],ends[3])
+        color=(255,0,0)
+        pygame.draw.line(surface, color, starts[0],starts[1], width)
+        pygame.draw.line(surface, color, ends[2],ends[3], width)
 
 class RRTGraph:
     class Node:
@@ -819,6 +892,9 @@ def main():
     start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
     goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
 
+    # start = (149, 596) 
+    # goal = (54, 561)
+
     # start, goal = (750,150), (500,160)
     # start, goal = (700, 520), (90, 90)
 
@@ -831,9 +907,10 @@ def main():
     graph = RRTGraph(start, goal, dimensions, map.map)
 
     obstacles = map.makeobs()
+    # obstacles=[]
     # <rect\((\d*), (\d*), (\d*), (\d*)\)> ($1, $2, $3, $4)
     # confined = [('triangle', [(746, 479), (798, 479), (769, 437)]), ('circle', ((354, 448), 25)), ('rect', (386, 141, 56, 46)), ('circle', ((809, 116), 21)), ('rect', (885, 301, 47, 37)), ('rect', (621, 400, 41, 45)), ('rect', (859, 487, 53, 38)), ('circle', ((714, 188), 30)), ('rect', (638, 230, 31, 56)), ('rect', (413, 256, 50, 54)), ('circle', ((616, 423), 15)), ('circle', ((828, 244), 19)), ('circle', ((497, 314), 20)), ('circle', ((597, 393), 23)), ('circle', ((836, 81), 18)), ('circle', ((97, 95), 22)), ('rect', (724, 32, 44, 49)), ('triangle', [(340, 118), (370, 118), (369, 63)]), ('rect', (90, 535, 40, 52)), ('circle', ((449, 122), 17)), ('rect', (245, 235, 56, 43)), ('triangle', [(969, 470), (1027, 470), (991, 431)]), ('circle', ((185, 405), 15)), ('rect', (70, 561, 47, 53)), ('circle', ((626, 423), 26)), ('circle', ((153, 267), 22)), ('triangle', [(103, 106), (159, 106), (119, 63)]), ('triangle', [(359, 193), (395, 193), (387, 159)]), ('circle', ((83, 504), 19)), ('triangle', [(481, 373), (540, 373), (504, 334)]), ('triangle', [(262, 97), (297, 97), (278, 64)]), ('triangle', [(285, 118), (327, 118), (309, 85)]), ('triangle', [(321, 185), (359, 185), (345, 155)]), ('circle', ((924, 203), 19)), ('triangle', [(403, 261), (440, 261), (427, 207)]), ('triangle', [(828, 234), (865, 234), (855, 202)]), ('rect', (477, 556, 60, 44)), ('rect', (310, 16, 53, 56)), ('rect', (752, 94, 45, 55)), ('rect', (364, 78, 35, 47)), ('circle', ((678, 143), 26)), ('triangle', [(751, 36), (796, 36), (766, -15)]), ('triangle', [(524, 277), (558, 277), (540, 222)]), ('circle', ((224, 257), 22)), ('rect', (462, 492, 31, 46)), ('triangle', [(16, 318), (60, 318), (41, 276)]), ('circle', ((790, 416), 24)), ('rect', (688, 176, 33, 50)), ('rect', (315, 444, 35, 31)), ('circle', ((742, 469), 24))]
-    # confined = [('triangle', [(389, 455), (431, 455), (406, 412)]), ('circle', ((188, 200), 25)), ('triangle', [(572, 114), (613, 114), (597, 56)]), ('triangle', [(123, 365), (172, 365), (151, 315)]), ('triangle', [(305, 413), (347, 413), (327, 361)]), ('circle', ((375, 320), 28)), ('rect', (425, 203, 58, 48)), ('rect', (176, 85, 34, 49)), ('triangle', [(32, 297), (72, 297), (61, 265)]), ('circle', ((662, 421), 20)), ('triangle', [(879, 494), (914, 494), (901, 439)]), ('triangle', [(842, 316), (884, 316), (862, 257)]), ('circle', ((586, 447), 27)), ('triangle', [(955, 2), (1013, 2), (975, -46)]), ('circle', ((947, 60), 28)), ('triangle', [(241, 206), (280, 206), (269, 154)]), ('triangle', [(378, 257), (438, 257), (400, 199)]), ('circle', ((660, 422), 26)), ('rect', (533, 491, 57, 39)), ('circle', ((929, 368), 26)), ('rect', (745, 516, 48, 42)), ('rect', (501, 440, 51, 34)), ('rect', (357, 419, 40, 39)), ('triangle', [(862, 538), (918, 538), (886, 506)]), ('circle', ((837, 404), 30)), ('triangle', [(694, 346), (738, 346), (723, 292)]), ('triangle', [(769, 452), (826, 452), (790, 402)]), ('triangle', [(891, 357), (938, 357), (918, 308)]), ('rect', (961, 273, 35, 50)), ('circle', ((157, 458), 19)), ('circle', ((483, 436), 28)), ('rect', (935, 232, 46, 49)), ('rect', (850, 79, 50, 30)), ('triangle', [(776, 124), (830, 124), (798, 69)]), ('rect', (136, 189, 39, 48)), ('rect', (377, 257, 32, 46)), ('triangle', [(195, 439), (252, 439), (222, 385)]), ('triangle', [(585, 76), (640, 76), (608, 43)]), ('circle', ((574, 440), 17)), ('rect', (327, 333, 51, 58)), ('triangle', [(911, 468), (945, 468), (926, 424)]), ('triangle', [(782, 190), (826, 190), (801, 155)]), ('rect', (961, 88, 38, 55)), ('circle', ((858, 427), 16)), ('circle', ((964, 335), 29)), ('circle', ((466, 278), 26)), ('triangle', [(631, 284), (683, 284), (647, 248)]), ('rect', (19, 237, 55, 46)), ('triangle', [(443, 337), (496, 337), (459, 307)]), ('triangle', [(739, 183), (771, 183), (768, 150)])]
+    # confined = [('circle', ((118, 255), 20)), ('circle', ((637, 101), 21)), ('circle', ((328, 245), 24)), ('rect', (261, 422, 46, 50)), ('circle', ((274, 506), 16)), ('circle', ((915, 317), 29)), ('circle', ((211, 481), 27)), ('triangle', [(334, 304), (386, 304), (359, 246)]), ('triangle', [(776, 328), (812, 328), (795, 268)]), ('triangle', [(363, 463), (411, 463), (378, 430)]), ('circle', ((603, 443), 19)), ('rect', (287, 48, 43, 51)), ('triangle', [(162, 74), (210, 74), (186, 22)]), ('triangle', [(668, 360), (709, 360), (689, 322)]), ('rect', (365, 36, 47, 57)), ('triangle', [(139, 307), (192, 307), (158, 277)]), ('circle', ((143, 272), 20)), ('rect', (498, 261, 37, 42)), ('triangle', [(906, 213), (954, 213), (924, 153)]), ('circle', ((570, 109), 29)), ('triangle', [(41, 205), (76, 205), (68, 146)]), ('triangle', [(831, 348), (881, 348), (856, 289)]), ('triangle', [(653, 245), (698, 245), (677, 194)]), ('triangle', [(365, 189), (413, 189), (393, 157)]), ('rect', (415, 86, 56, 57)), ('triangle', [(485, 404), (536, 404), (512, 362)]), ('rect', (582, 26, 37, 58)), ('circle', ((412, 196), 24)), ('circle', ((852, 300), 23)), ('circle', ((106, 432), 25)), ('triangle', [(792, 357), (842, 357), (811, 313)]), ('circle', ((792, 428), 26)), ('circle', ((287, 330), 27)), ('rect', (441, 158, 40, 54)), ('circle', ((937, 285), 24)), ('triangle', [(546, 18), (579, 18), (561, -39)]), ('circle', ((175, 531), 24)), ('triangle', [(343, 291), (386, 291), (358, 261)]), ('rect', (59, 277, 39, 30)), ('rect', (343, 96, 49, 38)), ('rect', (826, 115, 52, 50)), ('circle', ((703, 353), 28)), ('circle', ((769, 287), 24)), ('rect', (793, 124, 49, 39)), ('circle', ((65, 96), 30)), ('rect', (103, 227, 50, 43)), ('triangle', [(72, 194), (102, 194), (100, 150)]), ('triangle', [(457, 417), (515, 417), (486, 376)]), ('rect', (789, 528, 39, 59)), ('rect', (100, 505, 34, 50))]
     # obstacles = confined
     map.drawMap(obstacles)
 
