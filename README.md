@@ -1,6 +1,6 @@
-Run `pip install pygame`
+Run `pip install pygame` and `pip install scipy` and run a file:
 
-EP-Informed Hybrid: Mix of ellipse + EP-RRT*, better for speed on all types of maps (maze, obstacles, etc)
+EP-Informed Hybrid RRT*: Mix of ellipse + EP-RRT*, better for speed on all types of maps (maze, obstacles, etc)
 
 Informed RRT Star: RRT star with elliptic simplification, slightly better shortest path guarantee / smoothness
 
