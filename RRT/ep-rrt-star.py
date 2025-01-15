@@ -109,10 +109,11 @@ class RRTMap:
         self.drawObs(obstacles)
 
     def drawPath(self, path, from_goal = False):
+        color = self.Red if not from_goal else (255, 165, 0)
         for i in range(len(path)):
-            pygame.draw.circle(self.map, self.Red, path[i], self.nodeRad + 4, 0)
+            # pygame.draw.circle(self.map, color, path[i], self.nodeRad + 4, 0)
             if i < len(path) - 1:
-                pygame.draw.line(self.map, self.Red if not from_goal else (250,95,85), path[i], path[i + 1], self.nodeRad +  3)
+                pygame.draw.line(self.map, color, path[i], path[i + 1], self.nodeRad +  4)
 
     def resetPath(self, path):
         for node in path:
@@ -397,26 +398,6 @@ class SamplingRegion:
                     quad[2],quad[3]=quad[3],quad[2]
                 elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq):
                     quad[1],quad[3]=quad[3],quad[1]
-            # elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq) and math.dist(quad[0], quad[1]) < math.dist(quad[0], quad[3]):
-            #     quad[1],quad[3]=quad[3],quad[1]
-            # elif not self.segment_intersects_infinite_line(quad[0], quad[2], eq) and math.dist(quad[0], quad[2]) < math.dist(quad[0], quad[3]):
-            #     quad[2],quad[3]=quad[3],quad[2]
-
-            # angles = [(i, self.angle_pts(quad[0],quad[i])) for i in range(1, len(quad))]
-            # print(angles)
-            # C_index = sorted(angles, key=lambda x: x[1])[1][0]
-            # quad[2], quad[C_index] = quad[C_index], quad[2]
-
-            # if self.segment_intersects_infinite_line(quad[1], quad[2], *self.line_from_nodes(self.path[i], self.path[i+1])) and not self.segment_intersects_infinite_line(quad[0], quad[2], *self.line_from_nodes(self.path[i], self.path[i+1])):
-            #     quad[1],quad[2]=quad[2],quad[1]
-
-            # angle = self.angle_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
-            # D_index = 1 + min(
-            #     (0,2),
-            #     key = lambda i: abs(angle - angles[i][1])
-            # )
-
-            # quad[3], quad[D_index] = quad[D_index], quad[3]
 
             self.region_quads.append(quad)
             
@@ -465,7 +446,7 @@ class SamplingRegion:
         self.triangle_splits = []
         self.generate_expansion_region()
 
-    def draw_region(self, surface, color=(255, 0, 255), width=4):
+    def draw_region(self, surface, color=(170,170,170), width=2):
         # for key in range(len(self.path)):
         #     vertices = self.expanded_region[key]
             # pygame.draw.line(surface, color, vertices[0], vertices[1], width)
@@ -479,12 +460,12 @@ class SamplingRegion:
             # pygame.draw.line(surface, color, v1, v2, width)
             # pygame.draw.line(surface, color, v3, v4, width)
 
-            v1,v2 = self.expanded_region[i]
-            v3,v4 = self.expanded_region[i+1]
-            color = (random.random()*255, random.random()*255, random.random()*255)
+            # v1,v2 = self.expanded_region[i]
+            # v3,v4 = self.expanded_region[i+1]
+            # color = (random.random()*255, random.random()*255, random.random()*255)
 
-            pygame.draw.circle(surface, color, v1, width+7)
-            pygame.draw.circle(surface, color, v2, width+5)
+            # pygame.draw.circle(surface, color, v1, width+7)
+            # pygame.draw.circle(surface, color, v2, width+5)
             # pygame.draw.circle(surface, color, v3, width+5)
             # pygame.draw.circle(surface, color, v4, width+5)
             
@@ -515,7 +496,6 @@ class SamplingRegion:
             # pygame.draw.line(surface, edge_colors[4], quad[0], quad[3], width)
 
         starts,ends = self.region_quads[0], self.region_quads[-1]
-        color=(255,0,0)
         pygame.draw.line(surface, color, starts[0],starts[1], width)
         pygame.draw.line(surface, color, ends[2],ends[3], width)
 
@@ -568,13 +548,30 @@ class RRTGraph:
         self.ellipse = None
     
     def cache_obstacle_grid(self):
+        # Create the obstacle grid from the surface
         self.obstacle_grid = np.zeros((self.maph, self.mapw), dtype=bool)
         pygame_array = pygame.surfarray.array3d(self.surface)
         self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
         # Applies minimum distance that must be kept from obstacles:
-        # structure = np.ones((21, 21), dtype=bool) # radius 10
-        # self.obstacle_grid = binary_dilation(self.obstacle_grid, structure=structure)
+        # safe_radius = 10
+        # safe_zone_start = np.zeros_like(self.obstacle_grid, dtype=bool)
+        # safe_zone_goal = np.zeros_like(self.obstacle_grid, dtype=bool)
+        # def _mark_safe_zone(grid, position, radius):
+        #     x, y = position
+        #     for i in range(max(0, x - radius), min(self.mapw, x + radius + 1)):
+        #         for j in range(max(0, y - radius), min(self.maph, y + radius + 1)):
+        #             if np.sqrt((x - i) ** 2 + (y - j) ** 2) <= radius:
+        #                 grid[i, j] = True
+
+        # _mark_safe_zone(safe_zone_start, self.start, safe_radius)
+        # _mark_safe_zone(safe_zone_goal, self.goal, safe_radius)
+
+        # structure = np.ones((21, 21), dtype=bool)
+        # dilated_grid = binary_dilation(self.obstacle_grid, structure=structure)
+        # dilated_grid[safe_zone_start] = False
+        # dilated_grid[safe_zone_goal] = False
+        # self.obstacle_grid = dilated_grid
 
     def updateKDTree(self):
         self.kdTree = KDTree(self.nodes.items(), 2)
@@ -648,7 +645,7 @@ class RRTGraph:
             
             return self.cross_obstacle_points(start_pos, end_pos)
         except Exception as e:
-            print(startNode, endNode, self.x[startNode], self.y[startNode], self.x[endNode], self.y[endNode], self.x, self.y)
+            # print(startNode, endNode, self.x[startNode], self.y[startNode], self.x[endNode], self.y[endNode], self.x, self.y)
             raise e
 
     def get_line_points(self, start, end, num_points):
@@ -723,7 +720,7 @@ class RRTGraph:
 
     def calculate_k(self):
         z = (self.num_in_region() - self.num_max_in_region / 2)
-        k = 1/(2*math.pi) * ((z<=0) * math.pi + math.atan(1 / z) if z!=0 else math.pi/2) + 0.75 
+        k = 1/(2*math.pi) * ((z<=0) * math.pi + math.atan(1 / z) if z!=0 else math.pi/2) + 0.75
         return k
 
     def step(self, dmax=10, bias=False, from_goal = False):
@@ -853,11 +850,27 @@ class RRTGraph:
                 self.path.append(0)
         return self.goalFlag
 
-    def getPathCoords(self):
+    def getPathCoords(self, optimized=True):
         nodes = self.nodes if not self.from_goal else self.goal_nodes
         pathCoords = []
-        for i in self.path:
-            pathCoords.append((nodes[i].x, nodes[i].y))
+        if not self.path:
+            return pathCoords
+    
+        cur_idx = self.path[0]
+        pathCoords.append((nodes[cur_idx].x, nodes[cur_idx].y))
+        
+        i = 0
+        cur_node = self.path[0]
+        while i < len(self.path)-1:
+            cur = self.path[i]
+            next_node = self.path[i + 1]
+            
+            if self.cross_obstacle(cur_node, next_node, nodes):
+                pathCoords.append((nodes[cur].x, nodes[cur].y))
+                cur_node = cur
+            i += 1
+        
+        pathCoords.append((nodes[self.path[-1]].x, nodes[self.path[-1]].y))
         return pathCoords
 
     def bias(self):
@@ -892,11 +905,17 @@ def main():
     start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
     goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
 
-    # start = (149, 596) 
-    # goal = (54, 561)
+    #close to edge:
+    # start = (0,0)
+    # goal = (300,300)
 
-    # start, goal = (750,150), (500,160)
-    # start, goal = (700, 520), (90, 90)
+    # multiple potential paths:
+    # start = (40, 13) 
+    # goal = (910, 283) 
+
+    # MAZE
+    # start = (50, 50)
+    # goal = (950, 550)
 
     obsdim = 60
     obsnum = 50
@@ -909,9 +928,60 @@ def main():
     obstacles = map.makeobs()
     # obstacles=[]
     # <rect\((\d*), (\d*), (\d*), (\d*)\)> ($1, $2, $3, $4)
-    # confined = [('triangle', [(746, 479), (798, 479), (769, 437)]), ('circle', ((354, 448), 25)), ('rect', (386, 141, 56, 46)), ('circle', ((809, 116), 21)), ('rect', (885, 301, 47, 37)), ('rect', (621, 400, 41, 45)), ('rect', (859, 487, 53, 38)), ('circle', ((714, 188), 30)), ('rect', (638, 230, 31, 56)), ('rect', (413, 256, 50, 54)), ('circle', ((616, 423), 15)), ('circle', ((828, 244), 19)), ('circle', ((497, 314), 20)), ('circle', ((597, 393), 23)), ('circle', ((836, 81), 18)), ('circle', ((97, 95), 22)), ('rect', (724, 32, 44, 49)), ('triangle', [(340, 118), (370, 118), (369, 63)]), ('rect', (90, 535, 40, 52)), ('circle', ((449, 122), 17)), ('rect', (245, 235, 56, 43)), ('triangle', [(969, 470), (1027, 470), (991, 431)]), ('circle', ((185, 405), 15)), ('rect', (70, 561, 47, 53)), ('circle', ((626, 423), 26)), ('circle', ((153, 267), 22)), ('triangle', [(103, 106), (159, 106), (119, 63)]), ('triangle', [(359, 193), (395, 193), (387, 159)]), ('circle', ((83, 504), 19)), ('triangle', [(481, 373), (540, 373), (504, 334)]), ('triangle', [(262, 97), (297, 97), (278, 64)]), ('triangle', [(285, 118), (327, 118), (309, 85)]), ('triangle', [(321, 185), (359, 185), (345, 155)]), ('circle', ((924, 203), 19)), ('triangle', [(403, 261), (440, 261), (427, 207)]), ('triangle', [(828, 234), (865, 234), (855, 202)]), ('rect', (477, 556, 60, 44)), ('rect', (310, 16, 53, 56)), ('rect', (752, 94, 45, 55)), ('rect', (364, 78, 35, 47)), ('circle', ((678, 143), 26)), ('triangle', [(751, 36), (796, 36), (766, -15)]), ('triangle', [(524, 277), (558, 277), (540, 222)]), ('circle', ((224, 257), 22)), ('rect', (462, 492, 31, 46)), ('triangle', [(16, 318), (60, 318), (41, 276)]), ('circle', ((790, 416), 24)), ('rect', (688, 176, 33, 50)), ('rect', (315, 444, 35, 31)), ('circle', ((742, 469), 24))]
-    # confined = [('circle', ((118, 255), 20)), ('circle', ((637, 101), 21)), ('circle', ((328, 245), 24)), ('rect', (261, 422, 46, 50)), ('circle', ((274, 506), 16)), ('circle', ((915, 317), 29)), ('circle', ((211, 481), 27)), ('triangle', [(334, 304), (386, 304), (359, 246)]), ('triangle', [(776, 328), (812, 328), (795, 268)]), ('triangle', [(363, 463), (411, 463), (378, 430)]), ('circle', ((603, 443), 19)), ('rect', (287, 48, 43, 51)), ('triangle', [(162, 74), (210, 74), (186, 22)]), ('triangle', [(668, 360), (709, 360), (689, 322)]), ('rect', (365, 36, 47, 57)), ('triangle', [(139, 307), (192, 307), (158, 277)]), ('circle', ((143, 272), 20)), ('rect', (498, 261, 37, 42)), ('triangle', [(906, 213), (954, 213), (924, 153)]), ('circle', ((570, 109), 29)), ('triangle', [(41, 205), (76, 205), (68, 146)]), ('triangle', [(831, 348), (881, 348), (856, 289)]), ('triangle', [(653, 245), (698, 245), (677, 194)]), ('triangle', [(365, 189), (413, 189), (393, 157)]), ('rect', (415, 86, 56, 57)), ('triangle', [(485, 404), (536, 404), (512, 362)]), ('rect', (582, 26, 37, 58)), ('circle', ((412, 196), 24)), ('circle', ((852, 300), 23)), ('circle', ((106, 432), 25)), ('triangle', [(792, 357), (842, 357), (811, 313)]), ('circle', ((792, 428), 26)), ('circle', ((287, 330), 27)), ('rect', (441, 158, 40, 54)), ('circle', ((937, 285), 24)), ('triangle', [(546, 18), (579, 18), (561, -39)]), ('circle', ((175, 531), 24)), ('triangle', [(343, 291), (386, 291), (358, 261)]), ('rect', (59, 277, 39, 30)), ('rect', (343, 96, 49, 38)), ('rect', (826, 115, 52, 50)), ('circle', ((703, 353), 28)), ('circle', ((769, 287), 24)), ('rect', (793, 124, 49, 39)), ('circle', ((65, 96), 30)), ('rect', (103, 227, 50, 43)), ('triangle', [(72, 194), (102, 194), (100, 150)]), ('triangle', [(457, 417), (515, 417), (486, 376)]), ('rect', (789, 528, 39, 59)), ('rect', (100, 505, 34, 50))]
-    # obstacles = confined
+    # close to edge:
+    # obstacles = [('rect', (50, 50, 50, 100)), ('rect', (200, 50, 50, 490)), ('rect', (200, 290, 300, 10)), ('rect', (310, 310, 50, 1000))]
+
+    # multiple potential paths:
+    # obstacles = [('triangle', [(200, 437), (251, 437), (218, 379)]), ('circle', ((962, 125), 26)), ('rect', (479, 212, 38, 47)), ('circle', ((857, 314), 19)), ('circle', ((564, 340), 19)), ('triangle', [(501, 112), (558, 112), (524, 68)]), ('circle', ((521, 535), 15)), ('rect', (883, 472, 46, 32)), ('triangle', [(221, 220), (279, 220), (251, 180)]), ('triangle', [(885, 417), (937, 417), (909, 386)]), ('circle', ((208, 330), 29)), ('triangle', [(937, 32), (973, 32), (965, -1)]), ('triangle', [(468, 455), (527, 455), (483, 412)]), ('circle', ((803, 92), 18)), ('triangle', [(673, 236), (731, 236), (694, 201)]), ('circle', ((840, 166), 28)), ('circle', ((134, 65), 26)), ('triangle', [(818, 516), (855, 516), (837, 467)]), ('rect', (516, 417, 53, 41)), ('triangle', [(693, 375), (732, 375), (721, 324)]), ('circle', ((256, 443), 29)), ('circle', ((914, 96), 17)), ('triangle', [(497, 400), (554, 400), (515, 340)]), ('rect', (884, 31, 45, 41)), ('triangle', [(152, 90), (201, 90), (181, 43)]), ('circle', ((898, 403), 23)), ('circle', ((318, 198), 28)), ('triangle', [(226, 406), (260, 406), (255, 349)]), ('rect', (819, 103, 47, 57)), ('rect', (437, 105, 45, 45)), ('triangle', [(506, 454), (550, 454), (529, 399)]), ('circle', ((108, 237), 20)), ('triangle', [(769, 381), (819, 381), (795, 351)]), ('triangle', [(825, 413), (884, 413), (841, 377)]), ('circle', ((236, 205), 19)), ('rect', (245, 307, 56, 34)), ('rect', (595, 376, 52, 33)), ('triangle', [(49, 451), (84, 451), (65, 396)]), ('triangle', [(760, 6), (808, 6), (782, -36)]), ('circle', ((766, 335), 25)), ('circle', ((322, 298), 28)), ('rect', (478, 158, 37, 58)), ('rect', (689, 55, 50, 41)), ('circle', ((608, 395), 27)), ('circle', ((169, 200), 16)), ('circle', ((226, 303), 17)), ('triangle', [(133, 96), (163, 96), (155, 48)]), ('circle', ((607, 239), 17)), ('triangle', [(749, 425), (798, 425), (765, 366)]), ('rect', (54, 223, 48, 51))]
+    
+    # MAZE
+    # obstacles = [
+    #     # Outer walls with a small entry and exit point
+    #     ('rect', (0, 0, 1000, 10)),  # Top wall
+    #     ('rect', (0, 0, 10, 600)),   # Left wall
+    #     ('rect', (0, 590, 1000, 10)),  # Bottom wall
+    #     ('rect', (990, 0, 10, 600)),  # Right wall
+
+    #     # Vertical barriers
+    #     ('rect', (100, 50, 10, 500)),
+    #     ('rect', (300, 0, 10, 450)),
+    #     ('rect', (500, 150, 10, 420)),
+    #     ('rect', (700, 20, 10, 450)),
+    #     ('rect', (900, 150, 10, 450)),
+
+    #     # Horizontal barriers
+    #     ('rect', (10, 200, 270, 10)),
+    #     ('rect', (310, 400, 190, 10)),
+    #     ('rect', (510, 100, 190, 10)),
+    #     ('rect', (710, 300, 170, 10)),
+    #     ('rect', (850, 200, 50, 10)),
+    #     ('rect', (740, 100, 100, 10)),
+        
+    #     # Central labyrinth area
+    #     ('rect', (400, 200, 10, 100)),
+    #     ('rect', (450, 250, 50, 10)),
+    #     ('rect', (500, 200, 10, 100)),
+    #     ('rect', (450, 200, 50, 10)),
+
+    #     # Additional tricky paths
+    #     ('rect', (150, 300, 10, 100)),
+    #     ('rect', (200, 250, 10, 100)),
+    #     ('rect', (250, 300, 10, 100)),
+    #     ('rect', (350, 150, 100, 10)),
+    #     ('rect', (550, 350, 100, 10)),
+    #     ('rect', (850, 100, 10, 100)),
+    #     ('rect', (850, 400, 10, 100)),
+
+    #     # Dead ends
+    #     ('rect', (100, 550, 50, 10)),
+    #     ('rect', (400, 550, 50, 10)),
+    #     ('rect', (750, 550, 50, 10)),
+
+    #     # circles
+    #     # ('circle', ((800, 250), 50, 50)),
+    #     # ('circle', ((400, 100), 50, 50)),
+    # ]
+
     map.drawMap(obstacles)
 
     pygame.display.update()
@@ -942,7 +1012,6 @@ def main():
             if v.parent is not None:
                 pygame.draw.line(map.map, map.Green, (v.x, v.y), (goal_nodes[v.parent].x, goal_nodes[v.parent].y), map.edgeThickness)
         if isSolved:
-            # graph.ellipse.draw_bounding_rectangle(map.map)
             graph.sampling_region.draw_region(map.map)
             nodes = graph.goal_nodes if graph.from_goal else graph.nodes
             graph.path_to_goal()
@@ -953,7 +1022,8 @@ def main():
     while True:
         current_time = pygame.time.get_ticks()
         elapsed_time = (current_time - start_time) / 1000.0
-        if graph.bestCost and ((graph.num_in_region()) / math.log(graph.bestCost + 2) > 275):
+        # print(min(max(graph.bestCost / 2000 * 75 + 275, 275), 350))
+        if graph.bestCost and ((graph.num_in_region()) / math.log(graph.bestCost + 2) > min(max(graph.bestCost / 2000 * 75 + 275, 275), 350)):
             break
             area = graph.get_region_area()
             if area and ((graph.num_in_region()) / max(math.log(area + 2), 0.8) > 290):

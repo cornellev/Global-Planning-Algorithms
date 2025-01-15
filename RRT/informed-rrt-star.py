@@ -110,9 +110,9 @@ class RRTMap:
 
     def drawPath(self, path, from_goal = False):
         for i in range(len(path)):
-            pygame.draw.circle(self.map, self.Red, path[i], self.nodeRad + 4, 0)
+            # pygame.draw.circle(self.map, self.Red, path[i], self.nodeRad + 4, 0)
             if i < len(path) - 1:
-                pygame.draw.line(self.map, self.Red if not from_goal else (250,95,85), path[i], path[i + 1], self.nodeRad +  3)
+                pygame.draw.line(self.map, self.Red if not from_goal else (250,95,85), path[i], path[i + 1], self.nodeRad +  4)
 
     def resetPath(self, path):
         for node in path:
@@ -325,8 +325,24 @@ class RRTGraph:
         self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
         # Applies minimum distance that must be kept from obstacles:
-        # structure = np.ones((21, 21), dtype=bool) # radius 10
-        # self.obstacle_grid = binary_dilation(self.obstacle_grid, structure=structure)
+        # safe_radius = 10
+        # safe_zone_start = np.zeros_like(self.obstacle_grid, dtype=bool)
+        # safe_zone_goal = np.zeros_like(self.obstacle_grid, dtype=bool)
+        # def _mark_safe_zone(grid, position, radius):
+        #     x, y = position
+        #     for i in range(max(0, x - radius), min(self.mapw, x + radius + 1)):
+        #         for j in range(max(0, y - radius), min(self.maph, y + radius + 1)):
+        #             if np.sqrt((x - i) ** 2 + (y - j) ** 2) <= radius:
+        #                 grid[i, j] = True
+
+        # _mark_safe_zone(safe_zone_start, self.start, safe_radius)
+        # _mark_safe_zone(safe_zone_goal, self.goal, safe_radius)
+
+        # structure = np.ones((21, 21), dtype=bool)
+        # dilated_grid = binary_dilation(self.obstacle_grid, structure=structure)
+        # dilated_grid[safe_zone_start] = False
+        # dilated_grid[safe_zone_goal] = False
+        # self.obstacle_grid = dilated_grid
 
     def updateKDTree(self):
         self.kdTree = KDTree(self.nodes.items(), 2)
@@ -587,8 +603,25 @@ class RRTGraph:
     def getPathCoords(self):
         nodes = self.nodes if not self.from_goal else self.goal_nodes
         pathCoords = []
-        for i in self.path:
-            pathCoords.append((nodes[i].x, nodes[i].y))
+        if not self.path:
+            return pathCoords
+            
+        self.path
+        cur_idx = self.path[0]
+        pathCoords.append((nodes[cur_idx].x, nodes[cur_idx].y))
+        
+        i = 0
+        cur_node = self.path[0]
+        while i < len(self.path)-1:
+            cur = self.path[i]
+            next_node = self.path[i + 1]
+            
+            if self.cross_obstacle(cur_node, next_node, nodes):
+                pathCoords.append((nodes[cur].x, nodes[cur].y))
+                cur_node = cur
+            i += 1
+        
+        pathCoords.append((nodes[self.path[-1]].x, nodes[self.path[-1]].y))
         return pathCoords
 
     def bias(self):
@@ -622,6 +655,14 @@ def main():
     dimensions = (600, 1000)
     start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
     goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
+
+    #close to edge:
+    # start = (0,0)
+    # goal = (300,300)
+    # start = (40, 13) 
+    # goal = (910, 283) 
+    # start = (50,50)
+    # goal = (950, 550)
     obsdim = 60
     obsnum = 50
     iteration = 0
@@ -631,14 +672,59 @@ def main():
     graph = RRTGraph(start, goal, dimensions, map.map)
 
     obstacles = map.makeobs()
-    # confined = [    ('rect', (794, 5, 45, 39)),    ('triangle', [(918, 364), (978, 364), (941, 315)]),    ('triangle', [(230, 98), (272, 98), (254, 46)]),    ('rect', (323, 226, 40, 56)),    ('triangle', [(670, 547), (724, 547), (695, 505)]),    ('triangle', [(873, 359), (931, 359), (901, 307)]),    ('circle', ((617, 232), 28)),    ('rect', (645, 478, 54, 57)),    ('circle', ((168, 243), 21)),    ('rect', (438, 427, 55, 37)),    ('circle', ((590, 551), 27)),    ('rect', (588, 23, 43, 41)),    ('triangle', [(876, 465), (925, 465), (900, 412)]),    ('circle', ((324, 554), 17)),    ('rect', (386, 363, 51, 32)),    ('circle', ((418, 60), 17)),    ('rect', (105, 84, 52, 37)),    ('triangle', [(54, 84), (102, 84), (83, 53)]),    ('circle', ((541, 567), 28)),    ('circle', ((830, 291), 20)),    ('rect', (845, 88, 50, 39)),    ('triangle', [(916, 8), (956, 8), (943, -44)]),    ('circle', ((359, 406), 28)),    ('triangle', [(175, 416), (235, 416), (198, 369)]),    ('circle', ((412, 206), 26)),    ('rect', (380, 45, 49, 31)),    ('circle', ((440, 264), 22)),    ('rect', (174, 461, 45, 53)),    ('circle', ((310, 538), 24)),    ('rect', (68, 565, 45, 44)),    ('rect', (653, 196, 60, 40)),    ('triangle', [(376, 449), (422, 449), (391, 394)]),    ('triangle', [(0, 319), (48, 319), (16, 264)]),    ('rect', (565, 234, 42, 34)),    ('circle', ((530, 184), 26)),    ('triangle', [(728, 112), (766, 112), (745, 52)]),    ('circle', ((683, 339), 15)),    ('triangle', [(864, 140), (919, 140), (887, 93)]),    ('triangle', [(636, 163), (670, 163), (664, 118)]),    ('rect', (40, 2, 35, 54)),    ('triangle', [(931, 507), (971, 507), (958, 456)]),    ('triangle', [(339, 493), (387, 493), (366, 458)]),    ('rect', (135, 552, 45, 45)),    ('circle', ((245, 517), 16)),    ('circle', ((350, 181), 15)),    ('circle', ((119, 187), 30)),    ('circle', ((223, 151), 29)),    ('rect', (92, 108, 53, 39)),    ('rect', (327, 267, 31, 57)),    ('triangle', [(798, 174), (835, 174), (823, 133)])]
-    # obstacles = confined
+    # obstacles=[]
+    # <rect\((\d*), (\d*), (\d*), (\d*)\)> ($1, $2, $3, $4)
+    # close to edge:
+    # obstacles = [('rect', (50, 50, 50, 100)), ('rect', (200, 50, 50, 490)), ('rect', (200, 290, 300, 10)), ('rect', (310, 310, 50, 1000))]
+    # obstacles = [('triangle', [(200, 437), (251, 437), (218, 379)]), ('circle', ((962, 125), 26)), ('rect', (479, 212, 38, 47)), ('circle', ((857, 314), 19)), ('circle', ((564, 340), 19)), ('triangle', [(501, 112), (558, 112), (524, 68)]), ('circle', ((521, 535), 15)), ('rect', (883, 472, 46, 32)), ('triangle', [(221, 220), (279, 220), (251, 180)]), ('triangle', [(885, 417), (937, 417), (909, 386)]), ('circle', ((208, 330), 29)), ('triangle', [(937, 32), (973, 32), (965, -1)]), ('triangle', [(468, 455), (527, 455), (483, 412)]), ('circle', ((803, 92), 18)), ('triangle', [(673, 236), (731, 236), (694, 201)]), ('circle', ((840, 166), 28)), ('circle', ((134, 65), 26)), ('triangle', [(818, 516), (855, 516), (837, 467)]), ('rect', (516, 417, 53, 41)), ('triangle', [(693, 375), (732, 375), (721, 324)]), ('circle', ((256, 443), 29)), ('circle', ((914, 96), 17)), ('triangle', [(497, 400), (554, 400), (515, 340)]), ('rect', (884, 31, 45, 41)), ('triangle', [(152, 90), (201, 90), (181, 43)]), ('circle', ((898, 403), 23)), ('circle', ((318, 198), 28)), ('triangle', [(226, 406), (260, 406), (255, 349)]), ('rect', (819, 103, 47, 57)), ('rect', (437, 105, 45, 45)), ('triangle', [(506, 454), (550, 454), (529, 399)]), ('circle', ((108, 237), 20)), ('triangle', [(769, 381), (819, 381), (795, 351)]), ('triangle', [(825, 413), (884, 413), (841, 377)]), ('circle', ((236, 205), 19)), ('rect', (245, 307, 56, 34)), ('rect', (595, 376, 52, 33)), ('triangle', [(49, 451), (84, 451), (65, 396)]), ('triangle', [(760, 6), (808, 6), (782, -36)]), ('circle', ((766, 335), 25)), ('circle', ((322, 298), 28)), ('rect', (478, 158, 37, 58)), ('rect', (689, 55, 50, 41)), ('circle', ((608, 395), 27)), ('circle', ((169, 200), 16)), ('circle', ((226, 303), 17)), ('triangle', [(133, 96), (163, 96), (155, 48)]), ('circle', ((607, 239), 17)), ('triangle', [(749, 425), (798, 425), (765, 366)]), ('rect', (54, 223, 48, 51))]
+    # obstacles = [
+    #     # Outer walls with a small entry and exit point
+    #     ('rect', (0, 0, 1000, 10)),  # Top wall
+    #     ('rect', (0, 0, 10, 600)),   # Left wall
+    #     ('rect', (0, 590, 1000, 10)),  # Bottom wall
+    #     ('rect', (990, 0, 10, 600)),  # Right wall
+
+    #     # Vertical barriers
+    #     ('rect', (100, 50, 10, 500)),
+    #     ('rect', (300, 0, 10, 450)),
+    #     ('rect', (500, 150, 10, 420)),
+    #     ('rect', (700, 20, 10, 450)),
+    #     ('rect', (900, 150, 10, 450)),
+
+    #     # Horizontal barriers
+    #     ('rect', (10, 200, 270, 10)),
+    #     ('rect', (310, 400, 190, 10)),
+    #     ('rect', (510, 100, 190, 10)),
+    #     ('rect', (710, 300, 170, 10)),
+    #     ('rect', (850, 200, 50, 10)),
+    #     ('rect', (740, 100, 100, 10)),
+        
+    #     # Central labyrinth area
+    #     ('rect', (400, 200, 10, 100)),
+    #     ('rect', (450, 250, 50, 10)),
+    #     ('rect', (500, 200, 10, 100)),
+    #     ('rect', (450, 200, 50, 10)),
+
+    #     # Additional tricky paths
+    #     ('rect', (150, 300, 10, 100)),
+    #     ('rect', (200, 250, 10, 100)),
+    #     ('rect', (250, 300, 10, 100)),
+    #     ('rect', (350, 150, 100, 10)),
+    #     ('rect', (550, 350, 100, 10)),
+    #     ('rect', (850, 100, 10, 100)),
+    #     ('rect', (850, 400, 10, 100)),
+
+    #     # Dead ends
+    #     ('rect', (100, 550, 50, 10)),
+    #     ('rect', (400, 550, 50, 10)),
+    #     ('rect', (750, 550, 50, 10))
+    # ]
     map.drawMap(obstacles)
 
     pygame.display.update()
     pygame.event.clear()
 
-    if waitClick(): print(obstacles)
+    if waitClick(): print(obstacles, start, goal)
     
     distToGoal = math.dist(start, goal)
     start_time = pygame.time.get_ticks()
@@ -708,7 +794,7 @@ def main():
     map.map.blit(timer_text, (10, 30))
     pygame.display.update()
     pygame.event.clear()
-    if waitClick(): print(obstacles)
+    if waitClick(): print(obstacles, start, goal)
     main()
 
 
