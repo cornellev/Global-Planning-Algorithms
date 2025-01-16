@@ -276,6 +276,12 @@ class Ellipse:
         pygame.draw.line(surface, color, rotated_corners[3], rotated_corners[0], line_width)     
 
 class SamplingRegion:
+    class QuadRegion():
+        def __init__(self, quad, cumulative_area, split_ratio):
+            self.quad = quad
+            self.cumulative_area = cumulative_area
+            self.split_ratio = split_ratio
+
     def __init__(self, d, k, path, nodes, mapDimensions):
         self.d_base = d
         self.d = d * k
@@ -283,10 +289,8 @@ class SamplingRegion:
         self.maxClip = mapDimensions
         self.minClip = [0, 0]
         self.nodes = nodes
-        self.expanded_region = {}
-        self.region_quads = []
-        self.region_areas = []
-        self.triangle_splits = []  
+        self.expanded_region = []
+        self.cache = [None] * len(self.path)
         
         self.generate_expansion_region()
 
@@ -338,46 +342,43 @@ class SamplingRegion:
         v_double_prime = self.clip(point + z * v_double_prime_dir)
 
         return [v_prime, v_double_prime]
-
-    def generate_expansion_region(self):
-        for i in range(1, len(self.path) - 1):
-            e_i, sintheta = self.direction_vector(self.path[i-1], self.path[i], self.path[i+1])
-            self.expanded_region[i] = self.extension(e_i, sintheta, self.path[i])
-        self.expanded_region[0] = self.extension_end(self.path[0], self.path[1])
-        self.expanded_region[len(self.path)-1] = self.extension_end(self.path[-1], self.path[-2])
-        
-        self.precompute_region_data()
-
-    def sign(self, p1, center, p2):
-        return (p1[0]-center[0])*(p2[1]-center[1])-(p1[1]-center[1])*(p2[0]-center[0]) <= 0
-
-    def slope(self, p1, p2):
-        x1, y1 = p1
-        x2, y2 = p2
-        if x2 == x1:
-            return float('inf') if y2 > y1 else -float('inf')
-        return (y2 - y1) / (x2 - x1)
     
-    def slope_nodes(self, p1, p2):
-        x1, y1 = self.nodes[p1].x, self.nodes[p1].y
-        x2, y2 = self.nodes[p2].x, self.nodes[p2].y
-        if x2 == x1:
-            return float('inf') if y2 > y1 else -float('inf')
-        return (y2 - y1) / (x2 - x1)
-
-    def angle_pts(self, point1, point2):
-        r = math.atan2(point2[1] - point1[1], point2[0] - point1[0]) * 180/math.pi
-        return (r < 0) * 360 + r
-        # return math.atan2(point2[1] - point1[1], point2[0] - point1[0])
-
-    def angle_nodes(self, node1, node2):
-        return math.atan2(node2.y - node1.y, node2.x - node1.y)
-
     def line_from_nodes(self, p1, p2):
         a = p2.y - p1.y
         b = p1.x - p2.x
         c = a * p1.x + b * p1.y 
         return (a, b, -c)
+    
+    def generate_quad(self, i, cache):
+        quad = cache[i] + cache[i + 1]
+
+        eq = self.line_from_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
+        if self.segment_intersects_infinite_line(quad[0], quad[3], eq):
+            if not self.segment_intersects_infinite_line(quad[0], quad[2], eq):
+                quad[2],quad[3]=quad[3],quad[2]
+            elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq):
+                quad[1],quad[3]=quad[3],quad[1]
+        return quad
+
+    def generate_expansion_region(self):
+        self.cache[0] = self.extension_end(self.path[0], self.path[1])
+        for i in range(1, len(self.path) - 1):
+            e_i, sintheta = self.direction_vector(self.path[i-1], self.path[i], self.path[i+1])
+            self.cache[i] = self.extension(e_i, sintheta, self.path[i])
+        self.cache[-1] = self.extension_end(self.path[-1], self.path[-2])
+
+        cumulative = 0
+        for i in range(len(self.path) - 1):
+            quad = self.generate_quad(i, self.cache)
+            area1 = self.triangle_area(quad[0], quad[1], quad[2])
+            area2 = self.triangle_area(quad[0], quad[2], quad[3])
+            total = area1 + area2
+            cumulative += total
+            self.expanded_region.append(self.QuadRegion(
+                quad=quad,
+                cumulative_area=cumulative,
+                split_ratio = area1 / max(total, 0.01)
+            ))
 
     def point_line_side(self, line, p):
         return line[0] * p[0] + line[1] * p[1] + line[2]
@@ -387,29 +388,8 @@ class SamplingRegion:
         side2 = self.point_line_side(line, p2)
         return side1 * side2 < 0
 
-    def precompute_region_data(self):
-        total_area = 0
-        for i in range(len(self.path)-1):
-            quad = self.expanded_region[i] + self.expanded_region[i + 1]
-
-            eq = self.line_from_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
-            if self.segment_intersects_infinite_line(quad[0], quad[3], eq):
-                if not self.segment_intersects_infinite_line(quad[0], quad[2], eq):
-                    quad[2],quad[3]=quad[3],quad[2]
-                elif not self.segment_intersects_infinite_line(quad[0], quad[1], eq):
-                    quad[1],quad[3]=quad[3],quad[1]
-
-            self.region_quads.append(quad)
-            
-            area1 = self.triangle_area(*quad[0], *quad[1], *quad[2])
-            area2 = self.triangle_area(*quad[0], *quad[2], *quad[3])
-            
-            total_area += (area1 + area2)
-            self.region_areas.append(total_area)
-            self.triangle_splits.append(area1 / max((area1 + area2), 0.01))  
-
-    def triangle_area(self, x1, y1, x2, y2, x3, y3):
-        return abs((x1 * (y2 - y3) + x2 * (y3 - y1) + x3 * (y1 - y2)) / 2.0)
+    def triangle_area(self, p1, p2, p3):
+        return abs(np.cross(p2 - p1, p3 - p1)) / 2
 
     def random_point_in_triangle(self, a, b, c):
         r1 = random.random()
@@ -422,80 +402,38 @@ class SamplingRegion:
         return round(x), round(y)
 
     def random_point_in_path(self):
-        rand_val = random.random() * self.region_areas[-1]
-        left, right = 0, len(self.region_areas) - 1
+        rand_val = random.random() * self.expanded_region[-1].cumulative_area
+        left, right = 0, len(self.expanded_region) - 1
         while left < right:
             mid = (left + right) // 2
-            if self.region_areas[mid] < rand_val:
+            if self.expanded_region[mid].cumulative_area < rand_val:
                 left = mid + 1
             else:
                 right = mid
         selected_region = left
-        quad = self.region_quads[selected_region]
+        quad = self.expanded_region[selected_region].quad
         
-        if random.random() < self.triangle_splits[selected_region]:
+        if random.random() < self.expanded_region[selected_region].split_ratio:
             return self.random_point_in_triangle(quad[0], quad[1], quad[2])
         else:
             return self.random_point_in_triangle(quad[0], quad[2], quad[3])
 
     def shorten_radius(self, k):
         self.d = self.d_base * k
-        self.expanded_region = {}
-        self.region_quads = []
-        self.region_areas = []
-        self.triangle_splits = []
+        self.expanded_region = []
         self.generate_expansion_region()
 
     def draw_region(self, surface, color=(170,170,170), width=2):
-        # for key in range(len(self.path)):
-        #     vertices = self.expanded_region[key]
-            # pygame.draw.line(surface, color, vertices[0], vertices[1], width)
-
         for i in range(len(self.path)-1):
-            # v1 = self.expanded_region[i][0]
-            # v2 = self.expanded_region[i + 1][0]
-            # v3 = self.expanded_region[i][1]
-            # v4 = self.expanded_region[i + 1][1]
-
-            # pygame.draw.line(surface, color, v1, v2, width)
-            # pygame.draw.line(surface, color, v3, v4, width)
-
             # v1,v2 = self.expanded_region[i]
-            # v3,v4 = self.expanded_region[i+1]
             # color = (random.random()*255, random.random()*255, random.random()*255)
-
             # pygame.draw.circle(surface, color, v1, width+7)
             # pygame.draw.circle(surface, color, v2, width+5)
-            # pygame.draw.circle(surface, color, v3, width+5)
-            # pygame.draw.circle(surface, color, v4, width+5)
-            
-            quad = self.region_quads[i]
+            quad = self.expanded_region[i].quad
             pygame.draw.line(surface, color, quad[0], quad[3], width)
             pygame.draw.line(surface, color, quad[1], quad[2], width)
 
-            # quad = self.region_quads[i]
-            # edge_colors = [
-            #     (255, 0, 0),    # Red for edge 0 to 1
-            #     (0, 255, 0),    # Green for edge 1 to 2
-            #     (0, 0, 255),    # Blue for edge 0 to 2
-            #     (255, 255, 0),  # Yellow for edge 3 to 2
-            #     (255, 0, 255),  # Magenta for edge 0 to 3
-            # ]
-
-            # quad = self.region_quads[i]
-
-            # # Edge 0 to 1
-            # pygame.draw.line(surface, edge_colors[0], quad[0], quad[1], width)
-            # # Edge 1 to 2
-            # pygame.draw.line(surface, edge_colors[1], quad[1], quad[2], width)
-            # # Edge 0 to 2
-            # pygame.draw.line(surface, edge_colors[2], quad[0], quad[2], width)
-            # # Edge 3 to 2
-            # pygame.draw.line(surface, edge_colors[3], quad[3], quad[2], width)
-            # # Edge 0 to 3
-            # pygame.draw.line(surface, edge_colors[4], quad[0], quad[3], width)
-
-        starts,ends = self.region_quads[0], self.region_quads[-1]
+        starts,ends = self.expanded_region[0].quad, self.expanded_region[-1].quad
         pygame.draw.line(surface, color, starts[0],starts[1], width)
         pygame.draw.line(surface, color, ends[2],ends[3], width)
 
@@ -850,7 +788,7 @@ class RRTGraph:
                 self.path.append(0)
         return self.goalFlag
 
-    def getPathCoords(self, optimized=True):
+    def getPathCoords(self):
         nodes = self.nodes if not self.from_goal else self.goal_nodes
         pathCoords = []
         if not self.path:
