@@ -84,7 +84,7 @@ class RRTMap:
         self.MapDimensions = MapDimensions
         self.maph, self.mapw = self.MapDimensions
 
-        self.MapWindowName = "RRT* - Optimized Path Planning"
+        self.MapWindowName = "EP-RRT*"
         pygame.display.set_caption(self.MapWindowName)
         self.map = pygame.display.set_mode((self.mapw, self.maph))
         self.map.fill((255, 255, 255))
@@ -282,13 +282,12 @@ class SamplingRegion:
             self.cumulative_area = cumulative_area
             self.split_ratio = split_ratio
 
-    def __init__(self, d, k, path, nodes, mapDimensions):
+    def __init__(self, d, k, path, mapDimensions):
         self.d_base = d
         self.d = d * k
         self.path = path
         self.maxClip = mapDimensions
         self.minClip = [0, 0]
-        self.nodes = nodes
         self.expanded_region = []
         self.cache = [None] * len(self.path)
         
@@ -301,12 +300,8 @@ class SamplingRegion:
         return np.clip(vector, self.minClip, self.maxClip)
 
     def direction_vector(self, v1, v2, v3):
-        vec1 = self.normalize(np.array([
-            self.nodes[v1].x - self.nodes[v2].x, self.nodes[v1].y - self.nodes[v2].y
-        ]))
-        vec2 = self.normalize(np.array([
-            self.nodes[v3].x - self.nodes[v2].x, self.nodes[v3].y - self.nodes[v2].y
-        ]))
+        vec1 = self.normalize(v1 - v2)
+        vec2 = self.normalize(v3 - v2)
         
         e_i = vec1 + vec2
         if np.linalg.norm(e_i) == 0:
@@ -318,8 +313,7 @@ class SamplingRegion:
 
         return e_i, sintheta
 
-    def extension(self, e_i, sintheta, i):
-        v = np.array([self.nodes[i].x, self.nodes[i].y])
+    def extension(self, e_i, sintheta, v):
         e_i *= self.d / max(sintheta, 0.1)
 
         v_prime = self.clip(v + e_i)
@@ -328,9 +322,7 @@ class SamplingRegion:
         return [v_prime, v_double_prime]
 
     def extension_end(self, end, other):
-        point = np.array([self.nodes[end].x, self.nodes[end].y])
-        x_other, y_other = self.nodes[other].x, self.nodes[other].y
-        v_to_other = self.normalize(np.array([x_other - point[0], y_other - point[1]]))
+        v_to_other = self.normalize(other - end)
 
         perpendicular = np.array([-v_to_other[1], v_to_other[0]])
 
@@ -338,21 +330,21 @@ class SamplingRegion:
         v_double_prime_dir = self.normalize(perpendicular - v_to_other)
         z = self.d/0.851
 
-        v_prime = self.clip(point + z * v_prime_dir)
-        v_double_prime = self.clip(point + z * v_double_prime_dir)
+        v_prime = self.clip(end + z * v_prime_dir)
+        v_double_prime = self.clip(end + z * v_double_prime_dir)
 
         return [v_prime, v_double_prime]
     
     def line_from_nodes(self, p1, p2):
-        a = p2.y - p1.y
-        b = p1.x - p2.x
-        c = a * p1.x + b * p1.y 
+        a = p2[1] - p1[1]
+        b = p1[0] - p2[0]
+        c = a * p1[0] + b * p1[1]
         return (a, b, -c)
     
     def generate_quad(self, i, cache):
         quad = cache[i] + cache[i + 1]
 
-        eq = self.line_from_nodes(self.nodes[self.path[i]], self.nodes[self.path[i+1]])
+        eq = self.line_from_nodes(self.path[i], self.path[i+1])
         if self.segment_intersects_infinite_line(quad[0], quad[3], eq):
             if not self.segment_intersects_infinite_line(quad[0], quad[2], eq):
                 quad[2],quad[3]=quad[3],quad[2]
@@ -480,6 +472,7 @@ class RRTGraph:
         self.goalstate = set()
         self.startstate = set()
         self.path = []
+        self.pathCoords = []
         self.from_goal = None
 
         self.sampling_region = None
@@ -742,11 +735,11 @@ class RRTGraph:
             if self.bestCost < old_best:
                 if self.bestCost <= 0:
                     raise Exception("Best path cost was negative: " + self.bestCost)
+                self.path_to_goal()
                 self.sampling_region = SamplingRegion(
                     self.d_base,
                     self.calculate_k(),
-                    self.path,
-                    self.nodes if not self.from_goal else self.goal_nodes,
+                    self.getPathCoords(),
                     [self.mapw-1, self.maph-1]
                 )
 
@@ -790,12 +783,12 @@ class RRTGraph:
 
     def getPathCoords(self):
         nodes = self.nodes if not self.from_goal else self.goal_nodes
-        pathCoords = []
+        self.pathCoords = []
         if not self.path:
-            return pathCoords
+            return self.pathCoords
     
         cur_idx = self.path[0]
-        pathCoords.append((nodes[cur_idx].x, nodes[cur_idx].y))
+        self.pathCoords.append(np.array([nodes[cur_idx].x, nodes[cur_idx].y]))
         
         i = 0
         cur_node = self.path[0]
@@ -804,12 +797,12 @@ class RRTGraph:
             next_node = self.path[i + 1]
             
             if self.cross_obstacle(cur_node, next_node, nodes):
-                pathCoords.append((nodes[cur].x, nodes[cur].y))
+                self.pathCoords.append(np.array([nodes[cur].x, nodes[cur].y]))
                 cur_node = cur
             i += 1
         
-        pathCoords.append((nodes[self.path[-1]].x, nodes[self.path[-1]].y))
-        return pathCoords
+        self.pathCoords.append(np.array([nodes[self.path[-1]].x, nodes[self.path[-1]].y]))
+        return self.pathCoords
 
     def bias(self):
         self.step(bias=True)
@@ -952,8 +945,7 @@ def main():
         if isSolved:
             graph.sampling_region.draw_region(map.map)
             nodes = graph.goal_nodes if graph.from_goal else graph.nodes
-            graph.path_to_goal()
-            map.drawPath(graph.getPathCoords(), graph.from_goal)
+            map.drawPath(graph.pathCoords, graph.from_goal)
             pygame.display.update()
             if abs(graph.bestCost - distToGoal) < 1:
                 return True
@@ -985,7 +977,6 @@ def main():
                 graph.pruneTrees()
             if updateDisplay(nodes, goal_nodes, isSolved): break
             # waitClick()
-            graph.path = []
 
         iteration += 1
     

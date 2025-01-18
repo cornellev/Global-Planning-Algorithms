@@ -84,7 +84,7 @@ class RRTMap:
         self.MapDimensions = MapDimensions
         self.maph, self.mapw = self.MapDimensions
 
-        self.MapWindowName = "RRT* - Optimized Path Planning"
+        self.MapWindowName = "Informed RRT*"
         pygame.display.set_caption(self.MapWindowName)
         self.map = pygame.display.set_mode((self.mapw, self.maph))
         self.map.fill((255, 255, 255))
