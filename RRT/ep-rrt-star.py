@@ -78,7 +78,7 @@ class KDTree(object):
         return l[0] if len(l) else None
 
 class RRTMap:
-    def __init__(self, start, goal, MapDimensions, obsdim, obsnum):
+    def __init__(self, start, goal, MapDimensions):
         self.start = start
         self.goal = goal
         self.MapDimensions = MapDimensions
@@ -92,10 +92,6 @@ class RRTMap:
         self.nodeThickness = 0
         self.edgeThickness = 1
 
-        self.obstacles = []
-        self.obsDim = obsdim
-        self.obsNum = obsnum
-
         self.black = (0, 0, 0)
         self.grey = (75, 75, 75)
         self.Blue = (0, 0, 255)
@@ -106,7 +102,7 @@ class RRTMap:
     def drawMap(self, obstacles):
         pygame.draw.circle(self.map, self.Red, self.start, self.nodeRad + 5, 0)
         pygame.draw.circle(self.map, self.Green, self.goal, self.nodeRad + 5, 0)
-        self.drawObs(obstacles)
+        obstacles and self.drawObs(obstacles)
 
     def drawPath(self, path, from_goal = False):
         color = self.Red if not from_goal else (255, 165, 0)
@@ -118,64 +114,6 @@ class RRTMap:
     def resetPath(self, path):
         for node in path:
             pygame.draw.circle(self.map, self.Blue, node, self.nodeRad+4, 0)
-
-    
-    def makeRandomShape(self):
-        shape_type = random.choice(["rect", "circle", "triangle"])
-
-        if shape_type == "rect":
-            x = random.randint(0, self.mapw - 30)
-            y = random.randint(0, self.maph - 30)
-            return "rect", pygame.Rect((x, y), (random.randint(30, self.obsDim), random.randint(30, self.obsDim)))
-
-        elif shape_type == "circle":
-            x = random.randint(self.obsDim, self.mapw - 30)
-            y = random.randint(self.obsDim, self.maph - 30)
-            radius = random.randint(30, self.obsDim) // 2
-            return "circle", ((x, y), radius)
-
-        elif shape_type == "triangle":
-            x1 = random.randint(0, self.mapw - 30)
-            y1 = random.randint(0, self.maph - 30)
-            x2 = x1 + random.randint(30, self.obsDim)
-            y2 = y1
-            x3 = x1 + random.randint(30, self.obsDim) // 2
-            y3 = y1 - random.randint(30, self.obsDim)
-            return "triangle", [(x1, y1), (x2, y2), (x3, y3)]
-
-    def makeobs(self):
-        obs = []
-        
-        # Create rectangles representing the goal and start as circles with radius 5
-        goal_circle = pygame.Rect(self.goal[0] - 5, self.goal[1] - 5, 10, 10)  # Circle with radius 5
-        start_circle = pygame.Rect(self.start[0] - 5, self.start[1] - 5, 10, 10)  # Circle with radius 5
-
-        for _ in range(self.obsNum):
-            shape = None
-            startGoalCol = True
-            while startGoalCol:
-                shape = self.makeRandomShape()
-                shape_type, properties = shape
-                if shape_type == "rect":
-                    # Rectangle properties (rectangular shape)
-                    rect = properties
-                    startGoalCol = rect.colliderect(goal_circle) or rect.colliderect(start_circle)
-                elif shape_type == "circle":
-                    # Circle properties (circle shape)
-                    circle_center, radius = properties
-                    circle_rect = pygame.Rect(circle_center[0] - radius, circle_center[1] - radius, 2 * radius, 2 * radius)
-                    startGoalCol = circle_rect.colliderect(goal_circle) or circle_rect.colliderect(start_circle)
-                elif shape_type == "triangle":
-                    # Triangle properties (triangle shape)
-                    triangle_rect = pygame.Rect(min(p[0] for p in properties), min(p[1] for p in properties),
-                                                self.obsDim, self.obsDim)
-                    startGoalCol = triangle_rect.colliderect(goal_circle) or triangle_rect.colliderect(start_circle)
-
-            obs.append(shape)
-
-        self.obstacles = obs.copy()
-        return obs
-    
 
     def drawObs(self, obstacles):
         for obs in obstacles:
@@ -831,94 +769,150 @@ def waitClick():
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_SPACE : click = True
             elif event.type == pygame.KEYDOWN and event.key == pygame.K_o : return True
 
+def makeRandomShape(obsDim, mapw, maph):
+    shape_type = random.choice(["rect", "circle", "triangle"])
+
+    if shape_type == "rect":
+        x = random.randint(0, mapw - 30)
+        y = random.randint(0, maph - 30)
+        return "rect", pygame.Rect((x, y), (random.randint(30, obsDim), random.randint(30, obsDim)))
+
+    elif shape_type == "circle":
+        x = random.randint(obsDim, mapw - 30)
+        y = random.randint(obsDim, maph - 30)
+        radius = random.randint(30, obsDim) // 2
+        return "circle", ((x, y), radius)
+
+    elif shape_type == "triangle":
+        x1 = random.randint(0, mapw - 30)
+        y1 = random.randint(0, maph - 30)
+        x2 = x1 + random.randint(30, obsDim)
+        y2 = y1
+        x3 = x1 + random.randint(30, obsDim) // 2
+        y3 = y1 - random.randint(30, obsDim)
+        return "triangle", [(x1, y1), (x2, y2), (x3, y3)]
+
+def makeobs(obsDim, obsNum, start, goal, mapw, maph):
+    obs = []
+    goal_circle = pygame.Rect(goal[0] - 5, goal[1] - 5, 10, 10)
+    start_circle = pygame.Rect(start[0] - 5, start[1] - 5, 10, 10)
+
+    for _ in range(obsNum):
+        shape = None
+        startGoalCol = True
+        while startGoalCol:
+            shape = makeRandomShape(obsDim, mapw, maph)
+            shape_type, properties = shape
+            if shape_type == "rect":
+                rect = properties
+                startGoalCol = rect.colliderect(goal_circle) or rect.colliderect(start_circle)
+            elif shape_type == "circle":
+                circle_center, radius = properties
+                circle_rect = pygame.Rect(circle_center[0] - radius, circle_center[1] - radius, 2 * radius, 2 * radius)
+                startGoalCol = circle_rect.colliderect(goal_circle) or circle_rect.colliderect(start_circle)
+            elif shape_type == "triangle":
+                triangle_rect = pygame.Rect(min(p[0] for p in properties), min(p[1] for p in properties),
+                                            obsDim, obsDim)
+                startGoalCol = triangle_rect.colliderect(goal_circle) or triangle_rect.colliderect(start_circle)
+
+        obs.append(shape)
+    return obs
+
+
 def main():
     dimensions = (600, 1000)
-    start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
-    goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
-
-    #close to edge:
-    # start = (0,0)
-    # goal = (300,300)
-
-    # multiple potential paths:
-    # start = (40, 13) 
-    # goal = (910, 283) 
-
-    # MAZE
-    # start = (50, 50)
-    # goal = (950, 550)
-
     obsdim = 60
     obsnum = 50
-    iteration = 0
-
-    pygame.init()
-    map = RRTMap(start, goal, dimensions, obsdim, obsnum)
-    graph = RRTGraph(start, goal, dimensions, map.map)
-
-    obstacles = map.makeobs()
-    # obstacles=[]
-    # <rect\((\d*), (\d*), (\d*), (\d*)\)> ($1, $2, $3, $4)
-    # close to edge:
-    # obstacles = [('rect', (50, 50, 50, 100)), ('rect', (200, 50, 50, 490)), ('rect', (200, 290, 300, 10)), ('rect', (310, 310, 50, 1000))]
-
-    # multiple potential paths:
-    # obstacles = [('triangle', [(200, 437), (251, 437), (218, 379)]), ('circle', ((962, 125), 26)), ('rect', (479, 212, 38, 47)), ('circle', ((857, 314), 19)), ('circle', ((564, 340), 19)), ('triangle', [(501, 112), (558, 112), (524, 68)]), ('circle', ((521, 535), 15)), ('rect', (883, 472, 46, 32)), ('triangle', [(221, 220), (279, 220), (251, 180)]), ('triangle', [(885, 417), (937, 417), (909, 386)]), ('circle', ((208, 330), 29)), ('triangle', [(937, 32), (973, 32), (965, -1)]), ('triangle', [(468, 455), (527, 455), (483, 412)]), ('circle', ((803, 92), 18)), ('triangle', [(673, 236), (731, 236), (694, 201)]), ('circle', ((840, 166), 28)), ('circle', ((134, 65), 26)), ('triangle', [(818, 516), (855, 516), (837, 467)]), ('rect', (516, 417, 53, 41)), ('triangle', [(693, 375), (732, 375), (721, 324)]), ('circle', ((256, 443), 29)), ('circle', ((914, 96), 17)), ('triangle', [(497, 400), (554, 400), (515, 340)]), ('rect', (884, 31, 45, 41)), ('triangle', [(152, 90), (201, 90), (181, 43)]), ('circle', ((898, 403), 23)), ('circle', ((318, 198), 28)), ('triangle', [(226, 406), (260, 406), (255, 349)]), ('rect', (819, 103, 47, 57)), ('rect', (437, 105, 45, 45)), ('triangle', [(506, 454), (550, 454), (529, 399)]), ('circle', ((108, 237), 20)), ('triangle', [(769, 381), (819, 381), (795, 351)]), ('triangle', [(825, 413), (884, 413), (841, 377)]), ('circle', ((236, 205), 19)), ('rect', (245, 307, 56, 34)), ('rect', (595, 376, 52, 33)), ('triangle', [(49, 451), (84, 451), (65, 396)]), ('triangle', [(760, 6), (808, 6), (782, -36)]), ('circle', ((766, 335), 25)), ('circle', ((322, 298), 28)), ('rect', (478, 158, 37, 58)), ('rect', (689, 55, 50, 41)), ('circle', ((608, 395), 27)), ('circle', ((169, 200), 16)), ('circle', ((226, 303), 17)), ('triangle', [(133, 96), (163, 96), (155, 48)]), ('circle', ((607, 239), 17)), ('triangle', [(749, 425), (798, 425), (765, 366)]), ('rect', (54, 223, 48, 51))]
+    start, goal, obstacles, image = None, None, None, None
     
-    # MAZE
-    # obstacles = [
-    #     # Outer walls with a small entry and exit point
-    #     ('rect', (0, 0, 1000, 10)),  # Top wall
-    #     ('rect', (0, 0, 10, 600)),   # Left wall
-    #     ('rect', (0, 590, 1000, 10)),  # Bottom wall
-    #     ('rect', (990, 0, 10, 600)),  # Right wall
+    pygame.init()
 
-    #     # Vertical barriers
-    #     ('rect', (100, 50, 10, 500)),
-    #     ('rect', (300, 0, 10, 450)),
-    #     ('rect', (500, 150, 10, 420)),
-    #     ('rect', (700, 20, 10, 450)),
-    #     ('rect', (900, 150, 10, 450)),
+    # Options: random, maze, narrow, close to edge
+    config = "random"
 
-    #     # Horizontal barriers
-    #     ('rect', (10, 200, 270, 10)),
-    #     ('rect', (310, 400, 190, 10)),
-    #     ('rect', (510, 100, 190, 10)),
-    #     ('rect', (710, 300, 170, 10)),
-    #     ('rect', (850, 200, 50, 10)),
-    #     ('rect', (740, 100, 100, 10)),
-        
-    #     # Central labyrinth area
-    #     ('rect', (400, 200, 10, 100)),
-    #     ('rect', (450, 250, 50, 10)),
-    #     ('rect', (500, 200, 10, 100)),
-    #     ('rect', (450, 200, 50, 10)),
+    if config == "random":
+        start = (random.randint(0, dimensions[1] - 1), random.randint(0, dimensions[0] - 1))
+        goal = (random.randint(0, dimensions[1]- 1), random.randint(50, dimensions[0] - 1))
+        obstacles = makeobs(obsdim, obsnum, start, goal, dimensions[1], dimensions[0])
+    elif config == "maze":
+        start = (50, 50)
+        goal = (950, 550)
+        obstacles = [
+            # Outer walls with a small entry and exit point
+            ('rect', (0, 0, 1000, 10)),  # Top wall
+            ('rect', (0, 0, 10, 600)),   # Left wall
+            ('rect', (0, 590, 1000, 10)),  # Bottom wall
+            ('rect', (990, 0, 10, 600)),  # Right wall
 
-    #     # Additional tricky paths
-    #     ('rect', (150, 300, 10, 100)),
-    #     ('rect', (200, 250, 10, 100)),
-    #     ('rect', (250, 300, 10, 100)),
-    #     ('rect', (350, 150, 100, 10)),
-    #     ('rect', (550, 350, 100, 10)),
-    #     ('rect', (850, 100, 10, 100)),
-    #     ('rect', (850, 400, 10, 100)),
+            # Vertical barriers
+            ('rect', (100, 50, 10, 500)),
+            ('rect', (300, 0, 10, 450)),
+            ('rect', (500, 150, 10, 420)),
+            ('rect', (700, 20, 10, 450)),
+            ('rect', (900, 150, 10, 450)),
 
-    #     # Dead ends
-    #     ('rect', (100, 550, 50, 10)),
-    #     ('rect', (400, 550, 50, 10)),
-    #     ('rect', (750, 550, 50, 10)),
+            # Horizontal barriers
+            ('rect', (10, 200, 270, 10)),
+            ('rect', (310, 400, 190, 10)),
+            ('rect', (510, 100, 190, 10)),
+            ('rect', (710, 300, 170, 10)),
+            ('rect', (850, 200, 50, 10)),
+            ('rect', (740, 100, 100, 10)),
+            
+            # Central labyrinth area
+            ('rect', (400, 200, 10, 100)),
+            ('rect', (450, 250, 50, 10)),
+            ('rect', (500, 200, 10, 100)),
+            ('rect', (450, 200, 50, 10)),
 
-    #     # circles
-    #     # ('circle', ((800, 250), 50, 50)),
-    #     # ('circle', ((400, 100), 50, 50)),
-    # ]
+            # Additional tricky paths
+            ('rect', (150, 300, 10, 100)),
+            ('rect', (200, 250, 10, 100)),
+            ('rect', (250, 300, 10, 100)),
+            ('rect', (350, 150, 100, 10)),
+            ('rect', (550, 350, 100, 10)),
+            ('rect', (850, 100, 10, 100)),
+            ('rect', (850, 400, 10, 100)),
+
+            # Dead ends
+            ('rect', (100, 550, 50, 10)),
+            ('rect', (400, 550, 50, 10)),
+            ('rect', (750, 550, 50, 10)),
+
+            # circles
+            # ('circle', ((800, 250), 50, 50)),
+            # ('circle', ((400, 100), 50, 50)),
+        ]
+    elif config == "close to edge":
+        start = (0,0)
+        goal = (300,300)
+        obstacles = [('rect', (50, 50, 50, 100)), ('rect', (200, 50, 50, 490)), ('rect', (200, 290, 300, 10)), ('rect', (310, 310, 50, 1000))]
+    elif config == "narrow":
+        start = (50, 50)
+        goal = (950, 550)
+        try:
+            map = RRTMap(start, goal, dimensions)
+            graph = RRTGraph(start, goal, dimensions, map.map)
+            image = pygame.image.load(r'../maps/narrow-corridor.jpg')
+            pygame.display.get_surface().blit(image, (0,0))
+        except Exception as e:
+            print("Error reading file:", e)
+            return
+    else:
+        print("Invalid configuration!")
+        return
+
+    if config not in ['narrow']:
+        map = RRTMap(start, goal, dimensions)
+        graph = RRTGraph(start, goal, dimensions, map.map)
 
     map.drawMap(obstacles)
 
     pygame.display.update()
     pygame.event.clear()
 
-    if waitClick(): print(obstacles, start, goal)
+    if waitClick():
+        print("Obstacles:", obstacles, "Start:", start, "Goal:", goal)
     
     distToGoal = math.dist(start, goal)
     start_time = pygame.time.get_ticks()
@@ -927,10 +921,12 @@ def main():
     isSolved = False
     graph.cache_obstacle_grid()
     graph.bias()
+    iteration = 0
 
     def updateDisplay(nodes, goal_nodes, isSolved):
         map.map.fill((255,255,255))
         map.drawMap(obstacles)
+        image and pygame.display.get_surface().blit(image, (0,0))
         timer_text = font.render(f"Time: {elapsed_time:.2f} s", True, (0, 0, 0))
         map.map.blit(timer_text, (10, 10))
         
@@ -955,18 +951,7 @@ def main():
         # print(min(max(graph.bestCost / 2000 * 75 + 275, 275), 350))
         if graph.bestCost and ((graph.num_in_region()) / math.log(graph.bestCost + 2) > min(max(graph.bestCost / 2000 * 75 + 275, 275), 350)):
             break
-            area = graph.get_region_area()
-            if area and ((graph.num_in_region()) / max(math.log(area + 2), 0.8) > 290):
-                break
-        # if iteration % 1000 == 0:
-        #     X, Y, Parent = graph.bias()
-        #     pygame.draw.circle(map.map, map.grey, (X[-1], Y[-1]), map.nodeRad, map.nodeRad + 4, 0)
-        #     pygame.draw.line(map.map, map.Blue, (X[-1], Y[-1]), (X[Parent[-1]], Y[Parent[-1]]), map.edgeThickness)
-        # else:
         nodes, goal_nodes = graph.expand()
-        
-        #     pygame.draw.circle(map.map, map.grey, (X[-1], Y[-1]), map.nodeRad+4)
-        #     pygame.draw.line(map.map, map.Blue, (X[-1], Y[-1]), (X[Parent[-1]], Y[Parent[-1]]), map.edgeThickness)
 
         
         if not isSolved: 
