@@ -391,7 +391,7 @@ class RRTGraph:
 
         self.num_not_in_region = 0
         self.num_max_in_region = 2000
-        self.d_base = max(self.MapDimensions) / 8
+        self.d_base = max(self.MapDimensions) / 10
 
         self.nodes = {0: self.Node(x, y, cost=0)}
         self.cur_index = 0
@@ -422,24 +422,27 @@ class RRTGraph:
         pygame_array = pygame.surfarray.array3d(self.surface)
         self.obstacle_grid = (pygame_array[:, :, 0] == 0) & (pygame_array[:, :, 1] == 0) & (pygame_array[:, :, 2] == 0)
 
-        # Applies minimum distance that must be kept from obstacles:
+        # Set minimum approaching radius to obstacles
         # safe_radius = 10
-        # safe_zone_start = np.zeros_like(self.obstacle_grid, dtype=bool)
-        # safe_zone_goal = np.zeros_like(self.obstacle_grid, dtype=bool)
-        # def _mark_safe_zone(grid, position, radius):
-        #     x, y = position
-        #     for i in range(max(0, x - radius), min(self.mapw, x + radius + 1)):
-        #         for j in range(max(0, y - radius), min(self.maph, y + radius + 1)):
-        #             if np.sqrt((x - i) ** 2 + (y - j) ** 2) <= radius:
-        #                 grid[i, j] = True
+        # safe_radius_sq = safe_radius ** 2 
 
-        # _mark_safe_zone(safe_zone_start, self.start, safe_radius)
-        # _mark_safe_zone(safe_zone_goal, self.goal, safe_radius)
+        # x = np.arange(self.mapw)
+        # y = np.arange(self.maph)
+        # xx, yy = np.meshgrid(x, y, indexing='ij')
+
+        # def _mark_safe_zone(position):
+        #     x_pos, y_pos = position
+        #     distance_sq = (xx - x_pos) ** 2 + (yy - y_pos) ** 2
+        #     return distance_sq <= safe_radius_sq
+
+        # safe_zone_start = _mark_safe_zone(self.start)
+        # safe_zone_goal = _mark_safe_zone(self.goal)
 
         # structure = np.ones((21, 21), dtype=bool)
         # dilated_grid = binary_dilation(self.obstacle_grid, structure=structure)
         # dilated_grid[safe_zone_start] = False
         # dilated_grid[safe_zone_goal] = False
+
         # self.obstacle_grid = dilated_grid
 
     def updateKDTree(self):
