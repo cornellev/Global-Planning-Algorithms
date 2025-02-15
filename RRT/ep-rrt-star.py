@@ -666,7 +666,6 @@ class RRTGraph:
 
         kdTree.add_point((node, nodes[node]))
         if foundGoal:
-            self.num_not_in_region = len(nodes)
             self.goalFlag = True
             goalstate.add(cur_this)
 
@@ -674,6 +673,7 @@ class RRTGraph:
             self.path_to_goal()
 
             if self.bestCost < old_best:
+                if abs(self.bestCost - old_best) > 3: self.num_not_in_region = len(nodes)
                 if self.bestCost <= 0:
                     raise Exception("Best path cost was negative: " + self.bestCost)
                 self.path_to_goal()
